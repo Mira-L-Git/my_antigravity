@@ -9,11 +9,51 @@ import {
   computePendingReloadIds,
   filterDisplayMods,
   getShortSummary,
+  resolveLocale,
   scoreLogoButtonCandidate,
   sortCatalogMods,
 } from './manager-core.js';
 
-const ANCHOR_TITLE = 'My Antigravity 插件管理 (Alt + 点击触发原功能)';
+const COPY = {
+  'zh-CN': {
+    anchorTitle: 'My Antigravity 插件管理 (Alt + 点击触发原功能)',
+    dialogLabel: 'My Antigravity 插件管理',
+    pendingBadge: '待重载',
+    reloadBtn: '立即重载',
+    reloadingBtn: '正在重载...',
+    footerPending: (n) => `已保存 ${n} 项变更，重载窗口后生效`,
+    footerIdle: '状态已持久化 · Alt + 点击图标可触发原功能',
+    noBridgeHint:
+      '当前 app.asar 加载器版本尚未接入开关桥接接口。请完全退出 Antigravity 后运行一次 install.cmd（或 npm run install-loader）即可启用独立开关管理。',
+    noBridgeFooter: '提示：Alt + 点击图标可执行原按钮功能',
+    loading: '正在加载插件列表...',
+    empty: '暂无其它已同步的小插件。',
+    emptyFooter: '请运行 npm run sync 同步插件',
+    loadError: '读取插件列表失败',
+    toggleError: (id) => `更新 ${id} 状态失败`,
+    switchAria: (id) => `切换 ${id}`,
+    protectedTitle: '核心管理入口不可关闭',
+  },
+  en: {
+    anchorTitle: 'My Antigravity Mods (Alt+Click for original action)',
+    dialogLabel: 'My Antigravity Mod Manager',
+    pendingBadge: 'Restart',
+    reloadBtn: 'Reload',
+    reloadingBtn: 'Reloading...',
+    footerPending: (n) => `${n} ${n === 1 ? 'change' : 'changes'} saved — reload to apply`,
+    footerIdle: 'Saved · Alt+Click logo for original action',
+    noBridgeHint:
+      'The app.asar loader is outdated and lacks the mod manager bridge. Fully quit Antigravity and run install.cmd (or npm run install-loader) once.',
+    noBridgeFooter: 'Tip: Alt+Click logo for original action',
+    loading: 'Loading mods...',
+    empty: 'No other synced mods found.',
+    emptyFooter: 'Run npm run sync to sync mods',
+    loadError: 'Failed to load mod list',
+    toggleError: (id) => `Failed to update ${id}`,
+    switchAria: (id) => `Toggle ${id}`,
+    protectedTitle: 'Core manager cannot be disabled',
+  },
+};
 
 function getNormalizedText(el) {
   return String(el?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -147,7 +187,10 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
   let isReloading = false;
   let errorMessage = '';
   let mods = [];
-  let bootEnabledIds = Array.isArray(bridge?.bootEnabledIds) ? [...bridge.bootEnabledIds] : null;
+  const initialBridge = bridge || win.__myAntigravityManager || null;
+  let bootEnabledIds = Array.isArray(initialBridge?.bootEnabledIds)
+    ? [...initialBridge.bootEnabledIds]
+    : null;
   let currentAnchor = null;
   let activeAnim = null;
   let animEpoch = 0;
@@ -266,8 +309,19 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
     return bridge || win.__myAntigravityManager || null;
   }
 
+  function getLocale() {
+    const activeBridge = getBridge();
+    const ids = bootEnabledIds || activeBridge?.bootEnabledIds || null;
+    return resolveLocale(win, doc, ids);
+  }
+
+  function getCopy() {
+    return COPY[getLocale()] || COPY.en;
+  }
+
   function syncAnchorDecorations() {
     const found = findLogoButton(doc);
+    const copy = getCopy();
     if (currentAnchor && currentAnchor !== found) {
       currentAnchor.removeAttribute?.('data-ag-mm-anchor');
       currentAnchor.removeAttribute?.('data-ag-mm-open');
@@ -288,7 +342,9 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
       if (currentAnchor.getAttribute?.('data-ag-mm-orig-title') === null) {
         const origTitle = currentAnchor.getAttribute?.('title') || '';
         currentAnchor.setAttribute?.('data-ag-mm-orig-title', origTitle);
-        currentAnchor.setAttribute?.('title', ANCHOR_TITLE);
+      }
+      if (currentAnchor.getAttribute?.('title') !== copy.anchorTitle) {
+        currentAnchor.setAttribute?.('title', copy.anchorTitle);
       }
     }
     return currentAnchor;
@@ -372,6 +428,10 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
 
     positionPopup();
 
+    const locale = getLocale();
+    const copy = COPY[locale] || COPY.en;
+    popup.setAttribute('aria-label', copy.dialogLabel);
+
     const activeBridge = getBridge();
     const sorted = sortCatalogMods(filterDisplayMods(mods));
 
@@ -385,21 +445,16 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
 
     if (!activeBridge) {
       listEl.replaceChildren(
-        createEl(
-          doc,
-          'div',
-          { class: 'ag-mm-empty' },
-          '当前 app.asar 加载器版本尚未接入开关桥接接口。请完全退出 Antigravity 后运行一次 install.cmd（或 npm run install-loader）即可启用独立开关管理。',
-        ),
+        createEl(doc, 'div', { class: 'ag-mm-empty' }, copy.noBridgeHint),
       );
       footerEl.setAttribute('data-pending', 'false');
-      footerTextEl.textContent = '提示：Alt + 点击图标可执行原按钮功能';
+      footerTextEl.textContent = copy.noBridgeFooter;
       reloadBtnEl.hidden = true;
       return;
     }
 
     if (isLoading && sorted.length === 0) {
-      listEl.replaceChildren(createEl(doc, 'div', { class: 'ag-mm-empty' }, '正在加载插件列表...'));
+      listEl.replaceChildren(createEl(doc, 'div', { class: 'ag-mm-empty' }, copy.loading));
       footerEl.setAttribute('data-pending', 'false');
       footerTextEl.textContent = '';
       reloadBtnEl.hidden = true;
@@ -407,9 +462,9 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
     }
 
     if (sorted.length === 0) {
-      listEl.replaceChildren(createEl(doc, 'div', { class: 'ag-mm-empty' }, '暂无其它已同步的小插件。'));
+      listEl.replaceChildren(createEl(doc, 'div', { class: 'ag-mm-empty' }, copy.empty));
       footerEl.setAttribute('data-pending', 'false');
-      footerTextEl.textContent = '请运行 npm run sync 同步插件';
+      footerTextEl.textContent = copy.emptyFooter;
       reloadBtnEl.hidden = true;
       return;
     }
@@ -431,11 +486,11 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
       head.appendChild(createEl(doc, 'span', { class: 'ag-mm-item-name' }, mod.id));
       if (pendingSet.has(mod.id)) {
         head.appendChild(
-          createEl(doc, 'span', { class: 'ag-mm-badge', 'data-tone': 'pending' }, '待重载'),
+          createEl(doc, 'span', { class: 'ag-mm-badge', 'data-tone': 'pending' }, copy.pendingBadge),
         );
       }
 
-      const desc = createEl(doc, 'p', { class: 'ag-mm-item-desc' }, getShortSummary(mod));
+      const desc = createEl(doc, 'p', { class: 'ag-mm-item-desc' }, getShortSummary(mod, locale));
 
       info.appendChild(head);
       info.appendChild(desc);
@@ -446,13 +501,13 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
         class: 'ag-mm-switch',
         role: 'switch',
         'aria-checked': mod.enabled ? 'true' : 'false',
-        'aria-label': `切换 ${mod.id}`,
+        'aria-label': copy.switchAria(mod.id),
       });
       if (mod.protected || isToggling) {
         switchBtn.disabled = true;
         switchBtn.setAttribute('aria-disabled', 'true');
         if (mod.protected) {
-          switchBtn.setAttribute('title', '核心管理入口不可关闭');
+          switchBtn.setAttribute('title', copy.protectedTitle);
         }
       }
       switchBtn.appendChild(createEl(doc, 'span', { class: 'ag-mm-switch-thumb' }));
@@ -469,13 +524,13 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
 
     if (pendingIds.length > 0) {
       footerEl.setAttribute('data-pending', 'true');
-      footerTextEl.textContent = `已保存 ${pendingIds.length} 项变更，重载窗口后生效`;
+      footerTextEl.textContent = copy.footerPending(pendingIds.length);
       reloadBtnEl.hidden = false;
       reloadBtnEl.disabled = isReloading;
-      reloadBtnEl.textContent = isReloading ? '正在重载...' : '立即重载';
+      reloadBtnEl.textContent = isReloading ? copy.reloadingBtn : copy.reloadBtn;
     } else {
       footerEl.setAttribute('data-pending', 'false');
-      footerTextEl.textContent = '状态已持久化 · Alt + 点击图标可触发原功能';
+      footerTextEl.textContent = copy.footerIdle;
       reloadBtnEl.hidden = true;
     }
   }
@@ -500,10 +555,10 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
           bootEnabledIds = mods.filter((m) => m.enabled).map((m) => m.id);
         }
       } else {
-        errorMessage = res?.error || '读取插件列表失败';
+        errorMessage = res?.error || getCopy().loadError;
       }
     } catch (err) {
-      errorMessage = err?.message || '读取插件列表失败';
+      errorMessage = err?.message || getCopy().loadError;
     } finally {
       isLoading = false;
       render();
@@ -527,10 +582,10 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
       if (res && res.ok && Array.isArray(res.mods)) {
         mods = res.mods;
       } else {
-        errorMessage = res?.error || `更新 ${mod.id} 状态失败`;
+        errorMessage = res?.error || getCopy().toggleError(mod.id);
       }
     } catch (err) {
-      errorMessage = err?.message || `更新 ${mod.id} 状态失败`;
+      errorMessage = err?.message || getCopy().toggleError(mod.id);
     } finally {
       togglingIds.delete(mod.id);
       render();

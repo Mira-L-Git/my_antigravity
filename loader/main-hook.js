@@ -162,7 +162,13 @@ function scanAllMods(configDir = getConfigDir(), { includeCode = true } = {}) {
       dirName: dir.name,
       name: String(meta.name || id),
       version: String(meta.version || '0.0.0'),
-      summary: typeof meta.summary === 'string' ? meta.summary.trim() : '',
+      summary:
+        typeof meta.summary === 'string'
+          ? meta.summary.trim()
+          : meta.summary && typeof meta.summary === 'object'
+            ? meta.summary
+            : '',
+      summaryEn: typeof meta.summaryEn === 'string' ? meta.summaryEn.trim() : '',
       description: String(meta.description || ''),
       enabled: effectiveEnabled,
       defaultEnabled,

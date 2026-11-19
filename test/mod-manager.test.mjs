@@ -9,6 +9,7 @@ import {
   computePendingReloadIds,
   filterDisplayMods,
   getShortSummary,
+  resolveLocale,
   scoreLogoButtonCandidate,
   sortCatalogMods,
 } from '../plugins/mod-manager/src/manager-core.js';
@@ -363,6 +364,22 @@ test('filterDisplayMods、sortCatalogMods、getShortSummary 与 computePendingRe
 
   assert.equal(getShortSummary({ id: 'zh-cn', description: '一段很长的描述（含括号）' }), '桌面端界面简体中文化');
   assert.equal(
+    getShortSummary({ id: 'zh-cn', description: '一段很长的描述（含括号）' }, 'en'),
+    'Simplified Chinese desktop UI translation',
+  );
+  assert.equal(
+    getShortSummary({ id: 'enter-newline' }, 'en'),
+    'Enter for newline, Shift+Enter to send',
+  );
+  assert.equal(
+    getShortSummary({ id: 'custom-mod', summary: '自定义简短说明', summaryEn: 'Short EN summary', description: '长描述' }, 'en'),
+    'Short EN summary',
+  );
+  assert.equal(
+    getShortSummary({ id: 'custom-mod', summary: { en: 'Object EN', 'zh-CN': '对象中文' } }, 'en'),
+    'Object EN',
+  );
+  assert.equal(
     getShortSummary({ id: 'custom-mod', summary: '自定义简短说明', description: '长描述' }),
     '自定义简短说明',
   );
@@ -370,6 +387,11 @@ test('filterDisplayMods、sortCatalogMods、getShortSummary 与 computePendingRe
     getShortSummary({ id: 'other-mod', description: '实现某某功能（含补充说明）。第二句细节' }),
     '实现某某功能',
   );
+
+  // resolveLocale 判断 zh-cn 启动态与未开启态
+  assert.equal(resolveLocale({ __myAntigravityZhCnInstalled: true }, { documentElement: { lang: 'en' } }), 'zh-CN');
+  assert.equal(resolveLocale({}, { documentElement: { lang: 'en' } }, ['enter-newline', 'zh-cn']), 'zh-CN');
+  assert.equal(resolveLocale({}, { documentElement: { lang: 'en' } }, ['enter-newline']), 'en');
 
   // 改了 enter-newline 为 false，应提示待重载
   assert.deepEqual(
@@ -656,4 +678,53 @@ test('打开与关闭支持 WAAPI 过渡动画，中途重开可安全取消旧�
       fakeProto.animate = origAnimate;
     }
   }
+});
+
+test('zh-cn 未开启时功能介绍与管理菜单文案显示为英文', async () => {
+  const { win, doc, FakeElement } = createFakeDom();
+  doc.documentElement.setAttribute('lang', 'en');
+  const { logoBtn } = buildSidebarWithTopLogo(doc, FakeElement);
+
+  const mods = [
+    { id: 'enter-newline', enabled: true, protected: false },
+    { id: 'zh-cn', enabled: false, protected: false },
+  ];
+  const controller = createModManagerController(win, doc, {
+    bridge: {
+      bootEnabledIds: ['enter-newline', 'mod-manager'],
+      async getCatalog() {
+        return { ok: true, bootEnabledIds: ['enter-newline', 'mod-manager'], mods: mods.map((m) => ({ ...m })) };
+      },
+      async setModEnabled(id, enabled) {
+        return {
+          ok: true,
+          id,
+          enabled,
+          mods: mods.map((m) => (m.id === id ? { ...m, enabled } : { ...m })),
+        };
+      },
+      async reloadWindow() {
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.match(logoBtn.getAttribute('title'), /Alt\+Click/);
+
+  doc.dispatchToElement(logoBtn, 'click');
+  await new Promise((r) => setTimeout(r, 10));
+
+  const root = doc.querySelector('[data-ag-mm-root="true"]');
+  const rows = root.querySelectorAll('.ag-mm-item');
+  assert.equal(rows[0].querySelector('.ag-mm-item-desc')?.textContent, 'Enter for newline, Shift+Enter to send');
+  assert.equal(rows[1].querySelector('.ag-mm-item-desc')?.textContent, 'Simplified Chinese desktop UI translation');
+  assert.match(root.querySelector('.ag-mm-footer-text')?.textContent || '', /Alt\+Click/);
+
+  // 拨动开关后，待重载提示与按钮也应为英文
+  doc.dispatchToElement(rows[1].querySelector('.ag-mm-switch'), 'click');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(root.querySelector('.ag-mm-badge')?.textContent, 'Restart');
+  assert.equal(root.querySelector('.ag-mm-reload-btn')?.textContent, 'Reload');
+
+  controller.dispose();
 });

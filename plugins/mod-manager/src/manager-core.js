@@ -1,7 +1,7 @@
 /**
  * mod-manager 纯函数核心模块：
  * - 左上角 Antigravity 图标按钮候选项评分与防误判；
- * - 插件列表过滤、排序、简短功能摘要与待重载状态比对。
+ * - 插件列表过滤、排序、双语精简功能摘要与待重载状态比对。
  */
 
 const NON_LOGO_CONTROL_RE =
@@ -10,14 +10,47 @@ const NON_LOGO_CONTROL_RE =
 const LOGO_HINT_RE = /\b(?:antigravity|home|logo|brand)\b|首页/i;
 
 const SHORT_SUMMARY_BY_ID = {
-  'enter-newline': 'Enter 换行，Shift+Enter 发送',
-  'model-enhancer': '模型品牌图标与思考深度拉条',
-  'quota-rings': '左下角模型剩余额度双环',
-  'session-status': '输入框下方会话与 Token 状态栏',
-  'zh-cn': '桌面端界面简体中文化',
+  'enter-newline': {
+    'zh-CN': 'Enter 换行，Shift+Enter 发送',
+    en: 'Enter for newline, Shift+Enter to send',
+  },
+  'model-enhancer': {
+    'zh-CN': '模型品牌图标与思考深度拉条',
+    en: 'Model brand icons & effort slider',
+  },
+  'quota-rings': {
+    'zh-CN': '左下角模型剩余额度双环',
+    en: 'Bottom-left dual model quota rings',
+  },
+  'session-status': {
+    'zh-CN': '输入框下方会话与 Token 状态栏',
+    en: 'Session & token status bar below input',
+  },
+  'zh-cn': {
+    'zh-CN': '桌面端界面简体中文化',
+    en: 'Simplified Chinese desktop UI translation',
+  },
 };
 
 export const MIN_LOGO_SCORE = 4;
+
+/**
+ * 判断当前是否使用中文界面：
+ * 优先依据 zh-cn 运行标记 / 启动基线中是否包含 zh-cn / <html lang>。
+ */
+export function resolveLocale(win, doc, bootEnabledIds = null) {
+  if (win && win.__myAntigravityZhCnInstalled) {
+    return 'zh-CN';
+  }
+  if (Array.isArray(bootEnabledIds) && bootEnabledIds.includes('zh-cn')) {
+    return 'zh-CN';
+  }
+  const htmlLang = String(doc?.documentElement?.lang || '').toLowerCase();
+  if (htmlLang.startsWith('zh')) {
+    return 'zh-CN';
+  }
+  return 'en';
+}
 
 /**
  * 对候选元素特征进行打分；返回 -1 表示硬排除，不作为目标按钮。
@@ -94,29 +127,54 @@ export function sortCatalogMods(mods) {
 }
 
 /**
- * 提取精简的一句话功能说明：
- * 优先使用 mod.json 的 summary -> 内置精简映射 -> description 去冗余首句 -> name。
+ * 提取精简的一句话功能说明（按当前语言返回）：
+ * 优先使用 mod.json 的语言专属 summary / summaryEn -> 内置双语映射 -> description 去冗余首句 -> name。
  */
-export function getShortSummary(mod) {
+export function getShortSummary(mod, locale = 'zh-CN') {
+  const isZh = locale === 'zh-CN';
   if (!mod) {
     return '';
   }
-  const explicit = String(mod.summary || '').trim();
+
+  if (mod.summary && typeof mod.summary === 'object') {
+    const localized = String(
+      isZh ? mod.summary['zh-CN'] || mod.summary.zh || mod.summary.en || '' : mod.summary.en || mod.summary['zh-CN'] || '',
+    ).trim();
+    if (localized) {
+      return localized;
+    }
+  }
+
+  if (!isZh) {
+    const explicitEn = String(mod.summaryEn || '').trim();
+    if (explicitEn) {
+      return explicitEn;
+    }
+  }
+
+  const explicit = typeof mod.summary === 'string' ? mod.summary.trim() : '';
+  if (explicit && (isZh || !/[\u4e00-\u9fff]/.test(explicit))) {
+    return explicit;
+  }
+
+  const id = String(mod.id || '').trim();
+  if (id && Object.prototype.hasOwnProperty.call(SHORT_SUMMARY_BY_ID, id)) {
+    const entry = SHORT_SUMMARY_BY_ID[id];
+    return isZh ? entry['zh-CN'] : entry.en;
+  }
+
   if (explicit) {
     return explicit;
   }
-  const id = String(mod.id || '').trim();
-  if (id && Object.prototype.hasOwnProperty.call(SHORT_SUMMARY_BY_ID, id)) {
-    return SHORT_SUMMARY_BY_ID[id];
-  }
+
   const desc = String(mod.description || '').trim();
   if (desc) {
-    // 去掉括号补充细节并截取首句，保持菜单紧凑易读
     const stripped = desc.replace(/[（(][^）)]*[）)]/g, '').trim();
     const firstSentence = stripped.split(/[。；;\n]/)[0]?.trim();
     return firstSentence || stripped || desc;
   }
-  return String(mod.name || '暂无功能说明');
+
+  return String(mod.name || (isZh ? '暂无功能说明' : 'No description'));
 }
 
 /**
