@@ -1,0 +1,9 @@
+{
+  "id": "session-status",
+  "name": "会话状态栏 (Session Status)",
+  "version": "0.1.0",
+  "enabled": true,
+  "entry": "index.js",
+  "css": "styles.css",
+  "description": "在聊天输入框下方展示会话回合、步数、TPS、Token 用量、缓存命中率与上下文占用情况。"
+}

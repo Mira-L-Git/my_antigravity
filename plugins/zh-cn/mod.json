@@ -1,0 +1,8 @@
+{
+  "id": "zh-cn",
+  "name": "界面中文化（简体中文）",
+  "version": "0.1.0",
+  "enabled": true,
+  "entry": "index.js",
+  "description": "将 Antigravity 桌面版侧边栏、顶部菜单、设置页、快捷键、Customizations 与聊天区 UI 文本中文化（半保留技术专有名词，隔离对话正文与代码块）。"
+}

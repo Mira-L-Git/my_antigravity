@@ -1,0 +1,189 @@
+/* quota-rings 插件样式：左下角设置右侧双额度环（原生中性灰 + .surface-glass 提示） */
+
+[data-ag-qr-host='inline'] {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 6px;
+}
+
+[data-ag-qr-host='inline'] > :not([data-ag-qr-root]) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+[data-ag-qr-root] {
+  --ag-qr-color: var(--secondary-foreground, var(--muted-foreground, rgba(157, 157, 165, 0.92)));
+  --ag-qr-color-hover: var(--foreground, #e5e5e7);
+  --ag-qr-hover-bg: rgba(128, 128, 140, 0.14);
+  --ag-qr-focus: var(--primary, #3b82f6);
+
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: none;
+  gap: 10px;
+  color: var(--ag-qr-color);
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+@supports (color: color-mix(in srgb, white, black)) {
+  [data-ag-qr-root] {
+    --ag-qr-hover-bg: color-mix(in srgb, var(--secondary, #272727) 65%, transparent);
+  }
+}
+
+[data-ag-qr-root][data-ag-qr-mode='aligned'] {
+  position: fixed;
+  z-index: 20;
+}
+
+[data-ag-qr-root][data-ag-qr-collapsed='true'] {
+  display: none !important;
+}
+
+[data-ag-qr-root] .ag-qr-btn {
+  position: relative;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+[data-ag-qr-root] .ag-qr-btn[hidden] {
+  display: none !important;
+}
+
+[data-ag-qr-root] .ag-qr-btn:hover,
+[data-ag-qr-root] .ag-qr-btn:focus-visible {
+  background: var(--ag-qr-hover-bg);
+  color: var(--ag-qr-color-hover);
+}
+
+[data-ag-qr-root] .ag-qr-btn:focus-visible {
+  outline: 2px solid var(--ag-qr-focus);
+  outline-offset: 1px;
+}
+
+[data-ag-qr-root] .ag-qr-svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  overflow: visible;
+}
+
+[data-ag-qr-root] .ag-qr-track {
+  stroke: rgba(157, 157, 165, 0.22);
+}
+
+@supports (color: color-mix(in srgb, white, black)) {
+  [data-ag-qr-root] .ag-qr-track {
+    stroke: color-mix(in srgb, currentColor 18%, transparent);
+  }
+}
+
+[data-ag-qr-root] .ag-qr-number {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-family: var(--font-sans, inherit);
+  font-size: 8.5px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  transform: translateY(0.75px);
+  pointer-events: none;
+}
+
+[data-ag-qr-root] .ag-qr-number[data-digits='3'] {
+  font-size: 7.5px;
+  letter-spacing: 0;
+}
+
+/* 悬停详情 Tooltip：复用 Antigravity 原生 .surface-glass */
+[data-ag-qr-tooltip] {
+  position: fixed;
+  z-index: 2147483000;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
+  color: var(--foreground, #e5e5e7);
+  font-family: var(--font-sans, inherit);
+  font-size: 12px;
+  line-height: 16px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+  user-select: none;
+}
+
+[data-ag-qr-tooltip][hidden] {
+  display: none !important;
+}
+
+[data-ag-qr-tooltip] dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 16px;
+  margin: 0;
+}
+
+[data-ag-qr-tooltip] dt {
+  text-align: left;
+  font-weight: 500;
+}
+
+[data-ag-qr-tooltip] dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-ag-qr-tooltip] .ag-qr-tip-muted {
+  font-weight: 400;
+  color: var(--muted-foreground, var(--secondary-foreground, rgba(157, 157, 165, 0.9)));
+}
+
+[data-ag-qr-tooltip] .ag-qr-tip-group {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  gap: 2px 16px;
+}
+
+[data-ag-qr-tooltip] .ag-qr-tip-group.ag-qr-tip-sep {
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(157, 157, 165, 0.18);
+}
+
+@supports (color: color-mix(in srgb, white, black)) {
+  [data-ag-qr-tooltip] .ag-qr-tip-group.ag-qr-tip-sep {
+    border-top-color: color-mix(in srgb, var(--border, #ffffff) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ag-qr-root] .ag-qr-btn {
+    transition: none;
+  }
+}

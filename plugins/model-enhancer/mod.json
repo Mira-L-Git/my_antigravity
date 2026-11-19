@@ -1,0 +1,9 @@
+{
+  "id": "model-enhancer",
+  "name": "模型图标与思考深度滑条 (Model Enhancer)",
+  "version": "0.1.0",
+  "enabled": true,
+  "entry": "index.js",
+  "css": "styles.css",
+  "description": "在模型选择列表中展示品牌图标，并将思考深度切换改造为 Codex 风格的二段式拉条面板。"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "my-antigravity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custom desktop plugin loader and modular UX plugins for Antigravity.",
+  "type": "module",
+  "scripts": {
+    "build": "node plugins/zh-cn/build.mjs && node plugins/session-status/build.mjs && node plugins/model-enhancer/build.mjs && node plugins/quota-rings/build.mjs && node plugins/mod-manager/build.mjs",
+    "sync": "npm run build && node loader/cli.mjs sync",
+    "install-loader": "npm run build && node loader/cli.mjs install",
+    "uninstall-loader": "node loader/cli.mjs uninstall",
+    "status": "node loader/cli.mjs status",
+    "test": "node --test test/*.test.mjs"
+  }
+}

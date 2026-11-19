@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <!-- Antigravity 标志性多色渐变光晕（基于 0..180 局部坐标系） -->
+    <linearGradient id="agyBase" x1="20" y1="150" x2="150" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2979FF"/>
+      <stop offset="55%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <radialGradient id="agyLeftGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(60 72) rotate(45) scale(50 44)">
+      <stop offset="0%" stop-color="#4ADE80" stop-opacity="0.96"/>
+      <stop offset="55%" stop-color="#22C55E" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#2979FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agyRightGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(122 66) rotate(120) scale(48 40)">
+      <stop offset="0%" stop-color="#FF3D57" stop-opacity="0.92"/>
+      <stop offset="60%" stop-color="#FB7185" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#2979FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agyTopGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(92 30) rotate(90) scale(62 46)">
+      <stop offset="0%" stop-color="#FF5E3A"/>
+      <stop offset="42%" stop-color="#FFA826" stop-opacity="0.92"/>
+      <stop offset="80%" stop-color="#34A853" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#2979FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="myPillBorder" x1="74" y1="175" x2="182" y2="221" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ADE80"/>
+      <stop offset="50%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#FF6B4A"/>
+    </linearGradient>
+    <clipPath id="agyMarkClip">
+      <path d="M144.248 149.062C151.748 154.688 162.998 150.938 152.685 140.625C121.748 110.625 128.31 28.125 89.8727 28.125C51.4352 28.125 57.9977 110.625 27.0602 140.625C15.8102 151.875 27.9977 154.688 35.4977 149.062C64.5602 129.375 62.6852 94.6875 89.8727 94.6875C117.06 94.6875 115.185 129.375 144.248 149.062Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Antigravity 原版拱形标志（居中上移，留出四周安全边距） -->
+  <g transform="translate(36 8) scale(1.02)">
+    <g clip-path="url(#agyMarkClip)">
+      <rect x="0" y="0" width="180" height="180" fill="url(#agyBase)"/>
+      <rect x="0" y="0" width="180" height="180" fill="url(#agyLeftGlow)"/>
+      <rect x="0" y="0" width="180" height="180" fill="url(#agyRightGlow)"/>
+      <rect x="0" y="0" width="180" height="180" fill="url(#agyTopGlow)"/>
+    </g>
+    <path
+      d="M144.248 149.062C151.748 154.688 162.998 150.938 152.685 140.625C121.748 110.625 128.31 28.125 89.8727 28.125C51.4352 28.125 57.9977 110.625 27.0602 140.625C15.8102 151.875 27.9977 154.688 35.4977 149.062C64.5602 129.375 62.6852 94.6875 89.8727 94.6875C117.06 94.6875 115.185 129.375 144.248 149.062Z"
+      stroke="#0F172A"
+      stroke-opacity="0.16"
+      stroke-width="2"
+    />
+  </g>
+
+  <!-- 高对比 "My" 胶囊徽标（适配浅色与深色主题） -->
+  <rect x="74" y="175" width="108" height="46" rx="23" fill="#111827" stroke="url(#myPillBorder)" stroke-width="3.5"/>
+  <text
+    x="128"
+    y="208"
+    text-anchor="middle"
+    fill="#FFFFFF"
+    font-family="'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif"
+    font-size="30"
+    font-weight="800"
+    letter-spacing="0.5"
+  >My</text>
+</svg>

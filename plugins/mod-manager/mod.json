@@ -1,0 +1,10 @@
+{
+  "id": "mod-manager",
+  "name": "插件管理菜单 (Mod Manager)",
+  "version": "0.1.0",
+  "enabled": true,
+  "protected": true,
+  "entry": "index.js",
+  "css": "styles.css",
+  "description": "将左上角 Antigravity 图标按钮映射为插件管理菜单，支持单独开关各小插件并一键重载生效。"
+}

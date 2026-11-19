@@ -1,0 +1,8 @@
+{
+  "id": "enter-newline",
+  "name": "Enter 换行 / Shift+Enter 发送",
+  "version": "0.1.0",
+  "enabled": true,
+  "entry": "index.js",
+  "description": "将 Antigravity 桌面版聊天输入框的默认快捷键反转为：Enter 换行，Shift+Enter 发送（保留输入法选词、@ 提及与 / 斜杠菜单回车确认）。"
+}

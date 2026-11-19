@@ -1,0 +1,9 @@
+{
+  "id": "quota-rings",
+  "name": "模型额度环 (Quota Rings)",
+  "version": "0.1.0",
+  "enabled": true,
+  "entry": "index.js",
+  "css": "styles.css",
+  "description": "在左下角设置右侧显示其它模型（圆角方形）与 Gemini（圆形）额度环，支持双时间窗 1:3 分割、悬停明细与点击直达模型配额设置。"
+}
