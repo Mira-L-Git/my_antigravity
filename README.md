@@ -1,89 +1,91 @@
 <div align="center">
   <img src="assets/logo.svg" alt="My Antigravity Logo" width="84" height="84" />
   <h1>My Antigravity (<code>my_antigravity</code>)</h1>
-  <p>Modular desktop UX &amp; UI plugin loader and enhancement suite for the <strong>Antigravity</strong> Electron desktop app.</p>
-  <p><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></p>
+  <p>面向 <strong>Antigravity 桌面版（Electron）</strong> 的模块化插件加载器与 UI/UX 增强套件。</p>
+  <p><strong>简体中文</strong> | <a href="README.en.md">English</a></p>
 </div>
 
 ---
 
-## Overview
+## 简介
 
-**My Antigravity** injects a lightweight, zero-dependency renderer loader into Antigravity's `app.asar` once, and loads modular UI/UX plugins dynamically from `~/.gemini/config/plugins/my_antigravity/desktop-mods/`.
+**My Antigravity** 采用「一次挂载渲染层加载器 + 外部插件目录动态读取」方案：仅在 `app.asar` 注入一次极简加载器，后续所有小插件均在仓库内开发并同步至 `~/.gemini/config/plugins/my_antigravity/desktop-mods/`，重启窗口即可生效。
 
-- **Zero external npm dependencies** — built with pure Node.js (ASAR parser + SHA-256 integrity recalculation + IPC bridge).
-- **Non-destructive & reversible** — backs up original `app.asar` to `app.asar.my_antigravity.bak` and supports clean one-click uninstall.
-- **Independent plugin toggles** — enable or disable individual mods directly inside the app via `mod-manager`, without overwriting preferences on `npm run sync`.
+- **零外部 npm 依赖**：加载器与构建脚本完全基于原生 Node.js（含 ASAR 读写与 SHA-256 完整性校验重算）。
+- **无损备份与一键还原**：安装时自动备份原始 `app.asar` 为 `app.asar.my_antigravity.bak`，卸载即可完整恢复。
+- **独立开关持久化**：通过内置 `mod-manager` 在界面内独立开关各个小插件，状态保存于 `mods-state.json`，不会因 `npm run sync` 被覆盖。
 
 ---
 
-## Included Plugins
+## 当前已有功能
 
-| Plugin | Description |
+| 插件 | 功能说明 |
 | :--- | :--- |
-| **`enter-newline`** | Swaps chat input shortcuts in the Lexical editor to **`Enter` for newline** and **`Shift+Enter` to send**, while preserving IME composition, `@` / `/` typeahead selection, modifier combos (`Ctrl`/`Cmd`/`Alt+Enter`), and repeat-send protection. |
-| **`zh-cn`** | Simplified Chinese localization for Antigravity's desktop UI (top menus, sidebar, settings, shortcuts, Customizations, chat frame & side panels). Strictly isolates user messages, AI responses, code blocks, terminals, icon fonts, and URLs so conversation content is never altered. |
-| **`session-status`** | Compact status bar under the chat composer showing **Turns / Steps / Latest TPS**, **Total Tokens & Cache Hit Rate** (plus optional estimated API cost when server cost summary is enabled), and **Context Window Usage** ring with category breakdown. Collapsible into a mini footer ring. |
-| **`model-enhancer`** | Replaces the model picker with a two-stage **Codex-style thinking-effort slider** (click, drag, keyboard, and reset-to-default) and a **brand-icon model list** (Gemini, Claude, GPT/OpenAI, DeepSeek, Grok, Qwen, Kimi, GLM/Zhipu, MiniMax, Hunyuan, MiMo, Muse, etc.) with smooth transitions and `Esc` back-navigation. |
-| **`quota-rings`** | Displays two neutral `22×22px` quota rings beside the bottom-left Settings button: **Other Built-in Models** (rounded square) and **Gemini** (circle). Supports 1:3 dual-window split (5h + weekly) with automatic single-window fallback, hover reset-time tooltips, and click-to-open Model Quota settings. |
-| **`mod-manager`** | Maps the top-left Antigravity logo button to a **Plugin Manager** popover (`Alt + Click` preserves the original home action). Lists mods with persistent switches (`mods-state.json`) and one-click window reload when changes are pending. |
+| **`enter-newline`** | 将聊天输入框（Lexical 编辑器）默认快捷键反转为 **`Enter` 换行、`Shift+Enter` 发送**；自动放行输入法选词（IME）、`@` 提及与 `/` 斜杠补全菜单、`Ctrl`/`Cmd`/`Alt+Enter` 组合键，并防止按住 `Shift+Enter` 连发重复提交。 |
+| **`zh-cn`** | Antigravity 桌面版界面简体中文化，覆盖顶部菜单栏、侧边栏、设置页、快捷键、Customizations 与聊天外框/辅助面板（保留 `Antigravity`、`MCP`、`Skills`、`Rules`、`Hooks` 等技术专有名词）；严格隔离用户消息、AI 回复、代码块、终端、图标字体与 URL，绝不误翻对话与代码。 |
+| **`session-status`** | 在聊天输入框下方展示实时会话状态栏：**回合 / 模型步数 / 最近 TPS**（悬停或点击可看平均 TTFT、近 10 轮平均 TPS 与当前模型）、**Token 累计用量与缓存命中率**（含思考/正文/未缓存输入/缓存读取构成，开启 `enable-cost-accumulator` 时显示预估费用）、**上下文窗口占用环**（含系统与工具/对话消息/子智能体分类及压缩次数）；支持收起为底部迷你小环。 |
+| **`model-enhancer`** | 将模型选择弹窗改造为两段式面板：**Stage 1** 提供 Codex 风格的思考深度胶囊拉条（支持点击、拖动、键盘方向键调节及一键恢复默认 `↺`）；**Stage 2** 为模型列表注入品牌 SVG 图标（Gemini、Claude、GPT/OpenAI、DeepSeek、Grok、Qwen、Kimi、GLM/智谱、MiniMax、Hunyuan、MiMo、Muse 等），支持平滑过渡动画与 `Esc` 逐级返回。 |
+| **`quota-rings`** | 在左下角「设置」按钮右侧并排展示两个 `22×22px` 中性灰额度环：**左侧圆角方形**汇总其它内置模型（排除禁用与 BYOK 自定义模型），**右侧圆形**展示 Gemini 额度；支持 5h + 周窗 1:3 双段分割（无周窗数据时自动降级为单环），悬停显示重置时间（`MM/DD HH:mm`）与子池明细，点击直达「设置 → 模型」。 |
+| **`mod-manager`** | 将左上角 Antigravity 图标按钮映射为插件管理菜单（按住 `Alt + 左键` 保留原生回首页功能）；支持在界面内单独开关各小插件，存在待生效变更时在底部提示并提供一键重载窗口。 |
 
 ---
 
-## Installation & Usage
+## 安装与使用
 
-### Prerequisites
-- **Node.js** (v18+ recommended)
-- **Antigravity Desktop** (Electron app)
+### 环境要求
+- **Node.js**（建议 v18+）
+- **Antigravity Desktop** 桌面端
 
-### Install Loader & Sync Plugins
-1. **Completely quit Antigravity** (including the system tray icon) so `app.asar` is not locked.
-2. Run in the repository root:
+### 安装加载器并同步插件
+1. **完全退出 Antigravity 桌面版**（包括系统托盘图标），避免 `app.asar` 被占用锁定。
+2. 在仓库根目录运行：
    ```bash
    npm run install-loader
    ```
-   Or on Windows, double-click [`install.cmd`](install.cmd).
+   Windows 用户也可直接双击根目录下的 [`install.cmd`](install.cmd)。
 
-> **Windows Encoding Tip**: If `.cmd` script output shows garbled characters on Windows, switch your Windows system locale to UTF-8 (*Region settings → Administrative → Change system locale → Beta: Use Unicode UTF-8 for worldwide language support*), or run `npm run install-loader` directly in a terminal.
+> **Windows 安装提示**：如果运行 `.cmd` 安装脚本时出现中文乱码，需要将 Windows 系统区域设置切换为 UTF-8（在系统设置中勾选「Beta 版：使用 Unicode UTF-8 提供全球语言支持」），或直接使用 `npm run install-loader` 命令安装。
 
-### Common Commands
+### 常用维护命令
 ```bash
-npm test              # Run all unit tests (node --test)
-npm run build         # Bundle multi-file plugins into standalone index.js files
-npm run sync          # Build and sync plugins to ~/.gemini/config/plugins/my_antigravity/
-npm run status        # Inspect loader status and active plugin states
-npm run uninstall-loader  # Restore original app.asar (or double-click uninstall.cmd on Windows)
+npm test                  # 运行全部单元测试 (node --test)
+npm run build             # 将多文件源码插件打包为单文件 index.js
+npm run sync              # 构建并同步插件到 ~/.gemini/config/plugins/my_antigravity/
+npm run status            # 查看加载器状态与各小插件开关状态
+npm run uninstall-loader  # 卸载加载器并恢复原始 app.asar（Windows 也可双击 uninstall.cmd）
 ```
 
-> **Note**: When Antigravity auto-updates and replaces `app.asar`, simply quit Antigravity and re-run `npm run install-loader` (or `install.cmd`). Your `mods-state.json` toggle preferences will be preserved.
+> **提示**：
+> - 日常仅修改 `plugins/` 下的小插件时，运行 `npm run sync` 并重启 Antigravity 窗口即可，无需重装加载器。
+> - 当 Antigravity 官方自动升级覆盖 `app.asar` 后，完全退出客户端并重新运行一次 `install.cmd`（或 `npm run install-loader`）即可恢复；`mods-state.json` 中的开关偏好会自动保留。
 
 ---
 
-## Project Structure
+## 目录结构
 
 ```text
 my_antigravity/
-├── assets/logo.svg         # Plugin suite icon
-├── loader/                 # Zero-dependency Electron ASAR loader & CLI
-│   ├── asar.mjs            # ASAR reader/writer & SHA-256 integrity recalculation
-│   ├── main-hook.js        # Main-process IPC & mods-state.json persistence
-│   ├── preload-hook.js     # Preload bridge & main-world JS/CSS injector
-│   └── cli.mjs             # CLI (sync / install / uninstall / status)
-├── plugins/                # Modular desktop plugins (one directory per plugin)
+├── assets/logo.svg         # 插件组图标
+├── loader/                 # 零依赖 Electron 加载器与 CLI
+│   ├── asar.mjs            # ASAR 读写与 SHA-256 integrity 重算
+│   ├── main-hook.js        # 主进程 IPC 服务与 mods-state.json 持久化
+│   ├── preload-hook.js     # 预加载钩子与主世界 JS/CSS 注入
+│   └── cli.mjs             # 管理 CLI（sync / install / uninstall / status）
+├── plugins/                # 模块化小插件源码（一个插件一个子目录）
 │   ├── enter-newline/
 │   ├── mod-manager/
 │   ├── model-enhancer/
 │   ├── quota-rings/
 │   ├── session-status/
 │   └── zh-cn/
-├── test/                   # Unit tests (node --test)
-├── install.cmd             # Windows one-click installer
-├── uninstall.cmd           # Windows one-click uninstaller
+├── test/                   # 自动化单元测试
+├── install.cmd             # Windows 一键安装脚本
+├── uninstall.cmd           # Windows 一键卸载脚本
 └── package.json
 ```
 
 ---
 
-## Third-Party Notices
+## 第三方许可声明
 
-Third-party icon assets and their licenses used in `model-enhancer` are documented in [`plugins/model-enhancer/THIRD_PARTY_NOTICES.md`](plugins/model-enhancer/THIRD_PARTY_NOTICES.md).
+`model-enhancer` 所使用的第三方图标资源及开源许可详见 [`plugins/model-enhancer/THIRD_PARTY_NOTICES.md`](plugins/model-enhancer/THIRD_PARTY_NOTICES.md)。
