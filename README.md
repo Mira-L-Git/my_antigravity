@@ -27,6 +27,7 @@
 | **`model-enhancer`** | 将模型选择弹窗改造为两段式面板：**Stage 1** 提供 Codex 风格的思考深度胶囊拉条（支持点击、拖动、键盘方向键调节及一键恢复默认 `↺`）；**Stage 2** 为模型列表注入品牌 SVG 图标（Gemini、Claude、GPT/OpenAI、DeepSeek、Grok、Qwen、Kimi、GLM/智谱、MiniMax、Hunyuan、MiMo、Muse 等），支持平滑过渡动画与 `Esc` 逐级返回。 |
 | **`quota-rings`** | 在左下角「设置」按钮右侧并排展示两个 `22×22px` 中性灰额度环：**左侧圆角方形**汇总其它内置模型（排除禁用与 BYOK 自定义模型），**右侧圆形**展示 Gemini 额度；支持 5h + 周窗 1:3 双段分割（无周窗数据时自动降级为单环），悬停显示重置时间（`MM/DD HH:mm`）与子池明细，点击直达「设置 → 模型」。 |
 | **`file-link-color`** | 纯 CSS 插件：将聊天正文中带有文件图标（含专属图标与普通文档 `document.svg`，排除文件夹）的文件链接名称及后缀高亮为 Antigravity 原生链接蓝，自动适配明暗主题，并保留行号锚点（`#L...`）原灰色与侧边栏文件树原貌。 |
+| **`taskbar-badge`** | **（测试阶段）** 后台会话状态角标插件：当非当前聚焦会话发生**报错 / 提问审批 / 任务完成**时，按 **`报错 >> 提问 >> 完成`** 优先级在 Windows 任务栏通过多 DPI `setOverlayIcon` 显示去重会话计数（红 / 黄 / 深灰，超过 99 显示 `99+`），并在右下角系统托盘右上角同步显示绿 / 黄 / 红圆点，点开对应会话后计数自动 `-1` 直至归零。*(受 Windows 原生 `16×16 DIP` Overlay 槽位限制，小屏或低缩放下数字清晰度有限；需重跑一次 `install-loader` 以接入主进程桥接。)* |
 | **`mod-manager`** | 将左上角 Antigravity 图标按钮映射为插件管理菜单（按住 `Alt + 左键` 保留原生回首页功能）；支持在界面内单独开关各小插件，存在待生效变更时在底部提示并提供一键重载窗口。 |
 
 ---
@@ -79,6 +80,7 @@ my_antigravity/
 │   ├── model-enhancer/
 │   ├── quota-rings/
 │   ├── session-status/
+│   ├── taskbar-badge/
 │   └── zh-cn/
 ├── test/                   # 自动化单元测试
 ├── install.cmd             # Windows 一键安装脚本
