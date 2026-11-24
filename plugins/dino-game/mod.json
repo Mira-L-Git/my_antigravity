@@ -1,0 +1,13 @@
+{
+  "id": "dino-game",
+  "name": "Chrome Dino (谷歌小恐龙)",
+  "version": "0.1.0",
+  "enabled": true,
+  "entry": "index.js",
+  "css": "styles.css",
+  "summary": {
+    "zh-CN": "右侧辅助面板内嵌谷歌小恐龙小游戏",
+    "en": "Embedded Chrome Dino game in right aux pane"
+  },
+  "description": "在 Antigravity 右侧辅助面板右上角提供谷歌小恐龙快捷入口，采用无边框透明融合界面，支持空格/方向键跳跃与下蹲、P 键暂停与明暗主题自适应。"
+}

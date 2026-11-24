@@ -15,6 +15,10 @@ const NON_LOGO_CONTROL_RE =
 const LOGO_HINT_RE = /\b(?:antigravity|home|logo|brand)\b|首页/i;
 
 const SHORT_SUMMARY_BY_ID = {
+  'dino-game': {
+    'zh-CN': '右侧辅助面板内嵌谷歌小恐龙小游戏',
+    en: 'Embedded Chrome Dino game in right aux pane',
+  },
   'enter-newline': {
     'zh-CN': 'Enter 换行，Shift+Enter 发送',
     en: 'Enter for newline, Shift+Enter to send',
