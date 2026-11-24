@@ -30,6 +30,10 @@ const SHORT_SUMMARY_BY_ID = {
     'zh-CN': '输入框下方会话与 Token 状态栏',
     en: 'Session & token status bar below input',
   },
+  'taskbar-badge': {
+    'zh-CN': '任务栏会话计数与托盘状态圆点',
+    en: 'Taskbar badge count & tray status dot',
+  },
   'zh-cn': {
     'zh-CN': '桌面端界面简体中文化',
     en: 'Simplified Chinese desktop UI translation',
