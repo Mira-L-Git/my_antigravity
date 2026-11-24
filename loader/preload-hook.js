@@ -22,14 +22,22 @@ function installMyAntigravityDesktopMods() {
         electron_1.ipcRenderer.invoke('my-antigravity:set-mod-enabled', { id, enabled }),
       reloadWindow: () => electron_1.ipcRenderer.invoke('my-antigravity:reload-window'),
     };
+    const attentionApi = {
+      getBaseIcon: () => electron_1.ipcRenderer.invoke('my-antigravity:get-attention-base-icon'),
+      setAttentionState: (state) =>
+        electron_1.ipcRenderer.invoke('my-antigravity:set-attention-state', state),
+    };
     try {
       if (electron_1.contextBridge && typeof electron_1.contextBridge.exposeInMainWorld === 'function') {
         electron_1.contextBridge.exposeInMainWorld('__myAntigravityManager', managerApi);
+        electron_1.contextBridge.exposeInMainWorld('__myAntigravityAttention', attentionApi);
       } else {
         g.__myAntigravityManager = managerApi;
+        g.__myAntigravityAttention = attentionApi;
       }
     } catch {
       g.__myAntigravityManager = managerApi;
+      g.__myAntigravityAttention = attentionApi;
     }
 
     for (const mod of payload.mods) {

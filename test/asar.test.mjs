@@ -57,8 +57,10 @@ test('writePatchedAsar 与 installLoader/uninstallLoader 对真实 app.asar 副�
     assert.match(main1, /MY_ANTIGRAVITY_MAIN_LOADER_START/);
     assert.match(preload1, /MY_ANTIGRAVITY_LOADER_START/);
     assert.match(preload1, /__myAntigravityManager/);
+    assert.match(preload1, /__myAntigravityAttention/);
     assert.match(loader1, /my-antigravity:get-mods-sync/);
     assert.match(loader1, /my-antigravity:set-mod-enabled/);
+    assert.match(loader1, /my-antigravity:set-attention-state/);
     // 验证关键非修改文件的 offset 与 size 仍可读
     assert.ok(getAsarFile(patched1, 'package.json').toString('utf8').includes('"antigravity"'));
 
@@ -172,4 +174,181 @@ test('main-hook 支持独立 mods-state.json 持久化、防越界校验与保�
   } finally {
     fs.rmSync(tmpConfigDir, { recursive: true, force: true });
   }
+});
+
+test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘聚合与销毁恢复', async () => {
+  const filename = path.resolve('loader/main-hook.js');
+  const code = fs.readFileSync(filename, 'utf8');
+  const cjsRequire = createRequire(filename);
+  const mod = { exports: {} };
+
+  const handlers = new Map();
+  const winOverlays = [];
+  const trayImages = [];
+
+  class FakeTray {
+    setToolTip() {}
+    setImage(img) {
+      trayImages.push(img);
+    }
+    isDestroyed() {
+      return false;
+    }
+  }
+  const fakeTrayModule = {
+    createTray() {
+      const t = new FakeTray();
+      t.setToolTip('Antigravity');
+      return t;
+    },
+  };
+
+  const wc1Listeners = new Map();
+  const wc1 = {
+    id: 101,
+    once(ev, fn) {
+      wc1Listeners.set(ev, fn);
+    },
+  };
+  const wc2 = {
+    id: 102,
+    once() {},
+  };
+
+  const fakeBaseWin = {
+    isDestroyed: () => false,
+    setOverlayIcon(img, desc) {
+      winOverlays.push({ img, desc });
+    },
+  };
+
+  const mockElectron = {
+    ipcMain: {
+      listenerCount: () => 0,
+      on(ch, fn) {
+        handlers.set(ch, fn);
+      },
+      handle(ch, fn) {
+        handlers.set(ch, fn);
+      },
+      removeHandler() {},
+    },
+    BaseWindow: {
+      getAllWindows: () => [
+        {
+          isDestroyed: () => false,
+          contentView: { children: [{ webContents: wc1 }] },
+          setOverlayIcon(img, desc) {
+            winOverlays.push({ img, desc });
+          },
+        },
+      ],
+    },
+    BrowserWindow: {
+      fromWebContents: () => null,
+    },
+    Tray: FakeTray,
+    nativeImage: {
+      createEmpty: () => {
+        const reps = [];
+        return {
+          reps,
+          addRepresentation: (r) => reps.push(r),
+          isEmpty: () => reps.length === 0,
+        };
+      },
+      createFromDataURL: (url) => ({ kind: 'dataUrl', url, isEmpty: () => false }),
+    },
+  };
+
+  const fakeUtilsMod = {
+    resolveHubWindowFromWebContents: (wc) => (wc === wc1 ? fakeBaseWin : null),
+  };
+
+  const customRequire = (id) => {
+    if (id === 'electron') return mockElectron;
+    if (id === './tray') return fakeTrayModule;
+    if (id === './utils') return fakeUtilsMod;
+    return cjsRequire(id);
+  };
+
+  vm.runInNewContext(code, {
+    require: customRequire,
+    module: mod,
+    exports: mod.exports,
+    __filename: filename,
+    __dirname: path.dirname(filename),
+    process,
+    console,
+  });
+
+  mod.exports.registerMyAntigravityLoader();
+  fakeTrayModule.createTray();
+
+  // 注册 wc1 到销毁追踪
+  handlers.get('my-antigravity:get-mods-sync')({ sender: wc1 });
+
+  const setAttention = handlers.get('my-antigravity:set-attention-state');
+  // wc1 报告完成（多 DPI setOverlayIcon + 托盘绿点）
+  const r1 = await setAttention(
+    { sender: wc1 },
+    {
+      count: 1,
+      level: 'completed',
+      windowPngDataUrl: 'data:image/png;base64,WIN_1',
+      windowReps: [
+        { scaleFactor: 1, width: 16, height: 16, dataUrl: 'data:image/png;base64,WIN_16' },
+        { scaleFactor: 1.5, width: 24, height: 24, dataUrl: 'data:image/png;base64,WIN_24' },
+        { scaleFactor: 2, width: 32, height: 32, dataUrl: 'data:image/png;base64,WIN_32' },
+      ],
+      trayPngDataUrl: 'data:image/png;base64,TRAY_GREEN',
+    },
+  );
+  assert.equal(r1.ok, true);
+  assert.equal(r1.windowMethod, 'setOverlayIcon');
+  assert.equal(r1.repCount, 3);
+  assert.equal(r1.updatedWindow, true);
+  assert.equal(r1.updatedTray, true);
+  assert.equal(winOverlays.at(-1).img.reps.length, 3);
+  assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_GREEN');
+
+  // 计数归 0 时应清除 setOverlayIcon(null, '')
+  await setAttention(
+    { sender: wc1 },
+    {
+      count: 0,
+      level: 'none',
+      windowPngDataUrl: null,
+      windowReps: null,
+      trayPngDataUrl: null,
+    },
+  );
+  assert.equal(winOverlays.at(-1).img, null);
+
+  // wc2 报告审批（黄点），托盘应聚合为最高优先级黄点；随后 wc1 升级为报错（红点）
+  await setAttention(
+    { sender: wc2 },
+    {
+      count: 1,
+      level: 'approval',
+      windowPngDataUrl: 'data:image/png;base64,WIN_2',
+      trayPngDataUrl: 'data:image/png;base64,TRAY_YELLOW',
+    },
+  );
+  assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_YELLOW');
+
+  await setAttention(
+    { sender: wc1 },
+    {
+      count: 2,
+      level: 'error',
+      windowPngDataUrl: 'data:image/png;base64,WIN_ERR',
+      trayPngDataUrl: 'data:image/png;base64,TRAY_RED',
+    },
+  );
+  assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_RED');
+
+  // wc1 关闭销毁后，托盘自动回落为 wc2 的黄点
+  wc1Listeners.get('destroyed')?.();
+  assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_YELLOW');
 });

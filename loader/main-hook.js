@@ -13,8 +13,17 @@ const CHANNEL = 'my-antigravity:get-mods-sync';
 const CHANNEL_GET_CATALOG = 'my-antigravity:get-mod-catalog';
 const CHANNEL_SET_ENABLED = 'my-antigravity:set-mod-enabled';
 const CHANNEL_RELOAD_WINDOW = 'my-antigravity:reload-window';
+const CHANNEL_GET_ATTENTION_BASE_ICON = 'my-antigravity:get-attention-base-icon';
+const CHANNEL_SET_ATTENTION_STATE = 'my-antigravity:set-attention-state';
 
 const VALID_MOD_ID_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+const MAX_PNG_DATA_URL_LEN = 512 * 1024;
+const ATTENTION_LEVEL_RANK = {
+  none: 0,
+  completed: 1,
+  approval: 2,
+  error: 3,
+};
 
 let electronCache = null;
 function getElectron() {
@@ -231,14 +240,304 @@ function setModEnabled(id, enabled, configDir = getConfigDir()) {
   return { ok: true, id, enabled, mods: updated };
 }
 
+function viewContainsWebContents(view, targetWc) {
+  if (!view || !targetWc) return false;
+  if (view.webContents === targetWc) return true;
+  const children = view.children;
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      if (viewContainsWebContents(child, targetWc)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function resolveSenderWindow(sender) {
+  if (!sender) {
+    return null;
+  }
+  try {
+    const utilsMod = require('./utils');
+    if (utilsMod && typeof utilsMod.resolveHubWindowFromWebContents === 'function') {
+      const resolved = utilsMod.resolveHubWindowFromWebContents(sender);
+      if (resolved) {
+        return resolved;
+      }
+    }
+  } catch {
+    // 非打包环境或测试环境无 ./utils 时降级到通用查找
+  }
+
+  const { BaseWindow, BrowserWindow } = getElectron();
+  const findDirect = (wc) => {
+    if (!wc) return null;
+    if (BaseWindow && typeof BaseWindow.fromWebContents === 'function') {
+      const bw = BaseWindow.fromWebContents(wc);
+      if (bw) return bw;
+    }
+    if (BaseWindow && typeof BaseWindow.getAllWindows === 'function') {
+      for (const bw of BaseWindow.getAllWindows()) {
+        if (bw && (!bw.isDestroyed || !bw.isDestroyed()) && viewContainsWebContents(bw.contentView, wc)) {
+          return bw;
+        }
+      }
+    }
+    if (BrowserWindow && typeof BrowserWindow.fromWebContents === 'function') {
+      const win = BrowserWindow.fromWebContents(wc);
+      if (win) return win;
+    }
+    return null;
+  };
+
+  let cur = sender;
+  for (let depth = 0; cur && depth < 4; depth += 1) {
+    const win = findDirect(cur);
+    if (win) {
+      return win;
+    }
+    cur = cur.hostWebContents || null;
+  }
+  return null;
+}
+
+function isValidPngDataUrl(value) {
+  return (
+    typeof value === 'string' &&
+    value.length <= MAX_PNG_DATA_URL_LEN &&
+    value.startsWith('data:image/png;base64,')
+  );
+}
+
+function buildMultiDpiNativeImage(nativeImage, reps, fallbackDataUrl) {
+  if (!nativeImage) {
+    return null;
+  }
+  if (
+    Array.isArray(reps) &&
+    reps.length > 0 &&
+    typeof nativeImage.createEmpty === 'function'
+  ) {
+    const img = nativeImage.createEmpty();
+    if (img && typeof img.addRepresentation === 'function') {
+      let added = 0;
+      for (const rep of reps) {
+        if (!rep || !isValidPngDataUrl(rep.dataUrl)) continue;
+        const scaleFactor = Number(rep.scaleFactor);
+        const width = Math.floor(Number(rep.width));
+        const height = Math.floor(Number(rep.height));
+        if (
+          !Number.isFinite(scaleFactor) ||
+          scaleFactor <= 0 ||
+          !Number.isFinite(width) ||
+          width <= 0 ||
+          width > 512 ||
+          !Number.isFinite(height) ||
+          height <= 0 ||
+          height > 512
+        ) {
+          continue;
+        }
+        img.addRepresentation({
+          scaleFactor,
+          width,
+          height,
+          dataURL: rep.dataUrl,
+        });
+        added += 1;
+      }
+      if (added > 0 && (!img.isEmpty || !img.isEmpty())) {
+        return { img, repCount: added };
+      }
+    }
+  }
+
+  if (isValidPngDataUrl(fallbackDataUrl) && typeof nativeImage.createFromDataURL === 'function') {
+    const img = nativeImage.createFromDataURL(fallbackDataUrl);
+    if (img && (!img.isEmpty || !img.isEmpty())) {
+      return { img, repCount: 1 };
+    }
+  }
+  return null;
+}
+
+function createBaseIconStore() {
+  let loaded = false;
+  let baseDataUrl = null;
+  let baseWindowImage = null;
+  let baseTrayImage = null;
+
+  function ensureLoaded() {
+    if (loaded) {
+      return;
+    }
+    loaded = true;
+    const { nativeImage } = getElectron();
+    const candidates = [
+      path.join(__dirname, '..', 'icon.png'),
+      path.join(__dirname, '..', 'assets', 'icon.png'),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (!fs.existsSync(candidate)) continue;
+        const buf = fs.readFileSync(candidate);
+        if (!buf || buf.length === 0) continue;
+        baseDataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+        if (nativeImage && typeof nativeImage.createFromBuffer === 'function') {
+          const img = nativeImage.createFromBuffer(buf);
+          if (img && (!img.isEmpty || !img.isEmpty())) {
+            baseWindowImage = img;
+          }
+        }
+        break;
+      } catch (err) {
+        console.error('[my_antigravity] Failed to load base icon.png:', err);
+      }
+    }
+
+    const trayFile = process.platform === 'darwin' ? 'trayTemplate.png' : 'icon.png';
+    const trayPath = path.join(__dirname, '..', trayFile);
+    try {
+      if (fs.existsSync(trayPath) && nativeImage && typeof nativeImage.createFromPath === 'function') {
+        const trayImg = nativeImage.createFromPath(trayPath);
+        if (trayImg && (!trayImg.isEmpty || !trayImg.isEmpty())) {
+          if (process.platform === 'darwin' && typeof trayImg.setTemplateImage === 'function') {
+            trayImg.setTemplateImage(true);
+          }
+          baseTrayImage = trayImg;
+        }
+      }
+    } catch (err) {
+      console.error('[my_antigravity] Failed to load base tray icon:', err);
+    }
+    if (!baseTrayImage) {
+      baseTrayImage = baseWindowImage;
+    }
+  }
+
+  return {
+    getBaseDataUrl() {
+      ensureLoaded();
+      return baseDataUrl;
+    },
+    getBaseWindowImage() {
+      ensureLoaded();
+      return baseWindowImage;
+    },
+    getBaseTrayImage() {
+      ensureLoaded();
+      return baseTrayImage;
+    },
+  };
+}
+
+function installTrayCapture(onTrayCreated) {
+  const { Tray } = getElectron();
+  if (!Tray || !Tray.prototype || typeof Tray.prototype.setToolTip !== 'function') {
+    return;
+  }
+  let trayModule = null;
+  try {
+    trayModule = require('./tray');
+  } catch {
+    return;
+  }
+  if (!trayModule || typeof trayModule.createTray !== 'function') {
+    return;
+  }
+  if (trayModule.createTray.__myAntigravityWrapped) {
+    return;
+  }
+  const origCreateTray = trayModule.createTray;
+  const wrappedCreateTray = function (...args) {
+    const origSetToolTip = Tray.prototype.setToolTip;
+    let hooked = false;
+    try {
+      Tray.prototype.setToolTip = function (...tipArgs) {
+        try {
+          onTrayCreated(this);
+        } catch {
+          // ignore capture error
+        }
+        return origSetToolTip.apply(this, tipArgs);
+      };
+      hooked = true;
+    } catch {
+      hooked = false;
+    }
+    try {
+      return origCreateTray.apply(this, args);
+    } finally {
+      if (hooked) {
+        try {
+          Tray.prototype.setToolTip = origSetToolTip;
+        } catch {
+          // ignore restore error
+        }
+      }
+    }
+  };
+  wrappedCreateTray.__myAntigravityWrapped = true;
+  trayModule.createTray = wrappedCreateTray;
+}
+
 function registerMyAntigravityLoader() {
-  const { ipcMain, BrowserWindow } = getElectron();
+  const { ipcMain, nativeImage } = getElectron();
   if (!ipcMain) {
     return;
   }
 
   const bootEnabledByWebContents = new Map();
   const trackedSenders = new Set();
+  const trayStateByWebContents = new Map();
+  const iconStore = createBaseIconStore();
+  let capturedTray = null;
+
+  function applyAggregatedTrayIcon() {
+    if (!capturedTray || typeof capturedTray.setImage !== 'function') {
+      return false;
+    }
+    if (typeof capturedTray.isDestroyed === 'function' && capturedTray.isDestroyed()) {
+      capturedTray = null;
+      return false;
+    }
+    let best = null;
+    for (const entry of trayStateByWebContents.values()) {
+      if (!entry || entry.count <= 0) continue;
+      if (
+        !best ||
+        entry.rank > best.rank ||
+        (entry.rank === best.rank && entry.updatedAt > best.updatedAt)
+      ) {
+        best = entry;
+      }
+    }
+    if (!best || !best.trayPngDataUrl) {
+      const baseTray = iconStore.getBaseTrayImage();
+      if (baseTray) {
+        capturedTray.setImage(baseTray);
+      }
+      return true;
+    }
+    if (!nativeImage || typeof nativeImage.createFromDataURL !== 'function') {
+      return false;
+    }
+    const img = nativeImage.createFromDataURL(best.trayPngDataUrl);
+    if (img && (!img.isEmpty || !img.isEmpty())) {
+      if (process.platform === 'darwin' && typeof img.setTemplateImage === 'function') {
+        img.setTemplateImage(false);
+      }
+      capturedTray.setImage(img);
+      return true;
+    }
+    return false;
+  }
+
+  installTrayCapture((tray) => {
+    capturedTray = tray;
+    applyAggregatedTrayIcon();
+  });
 
   if (ipcMain.listenerCount(CHANNEL) === 0) {
     ipcMain.on(CHANNEL, (event) => {
@@ -255,6 +554,9 @@ function registerMyAntigravityLoader() {
             event.sender.once('destroyed', () => {
               bootEnabledByWebContents.delete(wcId);
               trackedSenders.delete(wcId);
+              if (trayStateByWebContents.delete(wcId)) {
+                applyAggregatedTrayIcon();
+              }
             });
           }
         }
@@ -299,8 +601,13 @@ function registerMyAntigravityLoader() {
       ipcMain.removeHandler?.(CHANNEL_RELOAD_WINDOW);
       ipcMain.handle(CHANNEL_RELOAD_WINDOW, (event) => {
         try {
-          const win = BrowserWindow?.fromWebContents?.(event.sender);
-          if (win && typeof win.isDestroyed === 'function' && !win.isDestroyed()) {
+          const win = resolveSenderWindow(event?.sender);
+          if (
+            win &&
+            typeof win.isDestroyed === 'function' &&
+            !win.isDestroyed() &&
+            typeof win.reload === 'function'
+          ) {
             win.reload();
             return { ok: true };
           }
@@ -311,6 +618,103 @@ function registerMyAntigravityLoader() {
           return { ok: false, error: '未找到可重载的窗口' };
         } catch (err) {
           console.error('[my_antigravity] Failed to reload window:', err);
+          return { ok: false, error: err?.message || String(err) };
+        }
+      });
+
+      ipcMain.removeHandler?.(CHANNEL_GET_ATTENTION_BASE_ICON);
+      ipcMain.handle(CHANNEL_GET_ATTENTION_BASE_ICON, () => {
+        try {
+          return {
+            ok: true,
+            dataUrl: iconStore.getBaseDataUrl(),
+            platform: process.platform,
+          };
+        } catch (err) {
+          console.error('[my_antigravity] Failed to get base icon:', err);
+          return { ok: false, error: err?.message || String(err), dataUrl: null, platform: process.platform };
+        }
+      });
+
+      ipcMain.removeHandler?.(CHANNEL_SET_ATTENTION_STATE);
+      ipcMain.handle(CHANNEL_SET_ATTENTION_STATE, (event, payload) => {
+        try {
+          const count = Math.max(0, Math.floor(Number(payload?.count) || 0));
+          const level =
+            typeof payload?.level === 'string' && Object.prototype.hasOwnProperty.call(ATTENTION_LEVEL_RANK, payload.level)
+              ? payload.level
+              : 'none';
+          const windowPngDataUrl = isValidPngDataUrl(payload?.windowPngDataUrl)
+            ? payload.windowPngDataUrl
+            : null;
+          const trayPngDataUrl = isValidPngDataUrl(payload?.trayPngDataUrl)
+            ? payload.trayPngDataUrl
+            : null;
+
+          let updatedWindow = false;
+          let windowMethod = null;
+          let repCount = 0;
+          const win = resolveSenderWindow(event?.sender);
+          const hasWin = Boolean(win && (!win.isDestroyed || !win.isDestroyed()));
+          const winType = win?.constructor?.name || null;
+          if (hasWin) {
+            if (typeof win.setOverlayIcon === 'function') {
+              windowMethod = 'setOverlayIcon';
+              if (count > 0) {
+                const built = buildMultiDpiNativeImage(
+                  nativeImage,
+                  payload?.windowReps,
+                  windowPngDataUrl,
+                );
+                if (built?.img) {
+                  repCount = built.repCount;
+                  win.setOverlayIcon(built.img, `${count} pending (${level})`);
+                  updatedWindow = true;
+                }
+              } else {
+                win.setOverlayIcon(null, '');
+                updatedWindow = true;
+              }
+            } else if (typeof win.setIcon === 'function') {
+              windowMethod = 'setIcon';
+              if (count > 0) {
+                const built = buildMultiDpiNativeImage(
+                  nativeImage,
+                  payload?.windowReps,
+                  windowPngDataUrl,
+                );
+                if (built?.img) {
+                  repCount = built.repCount;
+                  win.setIcon(built.img);
+                  updatedWindow = true;
+                }
+              } else {
+                const baseWinImg = iconStore.getBaseWindowImage();
+                if (baseWinImg) {
+                  win.setIcon(baseWinImg);
+                  updatedWindow = true;
+                }
+              }
+            }
+          }
+
+          const wcId = typeof event?.sender?.id === 'number' ? event.sender.id : 'default';
+          if (count > 0 && trayPngDataUrl) {
+            trayStateByWebContents.set(wcId, {
+              count,
+              level,
+              rank: ATTENTION_LEVEL_RANK[level] ?? 1,
+              trayPngDataUrl,
+              updatedAt: Date.now(),
+            });
+          } else {
+            trayStateByWebContents.delete(wcId);
+          }
+          const updatedTray = applyAggregatedTrayIcon();
+
+          return { ok: true, hasWin, winType, windowMethod, repCount, updatedWindow, updatedTray };
+        } catch (err) {
+          console.error('[my_antigravity] Failed to set attention state:', err);
           return { ok: false, error: err?.message || String(err) };
         }
       });
