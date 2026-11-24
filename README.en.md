@@ -28,6 +28,7 @@
 | **`quota-rings`** | Displays two neutral `22×22px` quota rings beside the bottom-left Settings button: **Other Built-in Models** (rounded square) and **Gemini** (circle). Supports 1:3 dual-window split (5h + weekly) with automatic single-window fallback, hover reset-time tooltips, and click-to-open Model Quota settings. |
 | **`file-link-color`** | Pure CSS plugin that highlights filenames (including extensions) of chat file links with file icons (including generic `document.svg`, excluding folders) in native link blue, adapting automatically to light/dark themes while preserving muted line-number suffixes (`#L...`) and file tree styling. |
 | **`taskbar-badge`** | **(Testing / Experimental)** Unread background session indicator: when unfocused or background conversations finish, request approval, or error, displays a deduplicated session count on the Windows taskbar via multi-DPI `setOverlayIcon` (**`error >> approval >> completed`**, colored red / yellow / dark charcoal, `99+` cap) and a matching green / yellow / red dot on the system tray icon. Clicking each conversation decrements the count back to zero. *(Limited by Windows' native `16×16 DIP` overlay slot clarity; requires re-running `install-loader` once for the main-process bridge.)* |
+| **`dino-game`** | Right auxiliary pane mini-game: adds a compact Dino button to the top-right toolbar of the right aux pane (no left sidebar entry) that opens a borderless Chrome Dino game blending into the native pane background; supports `Space` / `↑` jump, `↓` duck/fast-drop, `P` pause, `Esc` close, light/dark theme adaptation, and strict focus isolation from the main chat input. |
 | **`mod-manager`** | Maps the top-left Antigravity logo button to a **Plugin Manager** popover (`Alt + Click` preserves the original home action). Lists mods with persistent switches (`mods-state.json`) and one-click window reload when changes are pending. |
 
 ---
@@ -72,6 +73,7 @@ my_antigravity/
 │   ├── preload-hook.js     # Preload bridge & main-world JS/CSS injector
 │   └── cli.mjs             # CLI (sync / install / uninstall / status)
 ├── plugins/                # Modular desktop plugins (one directory per plugin)
+│   ├── dino-game/
 │   ├── enter-newline/
 │   ├── file-link-color/
 │   ├── mod-manager/
