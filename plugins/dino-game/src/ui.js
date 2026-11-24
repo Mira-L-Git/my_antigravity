@@ -107,26 +107,56 @@ function hasAuxNewTabMenu(auxPane) {
   return false;
 }
 
+function isIconOnlyButton(btn) {
+  const text = String(btn.textContent || '').trim();
+  if (text.length === 0) return true;
+  // 兼容图标字体（如 google-symbols 的 more_vert）
+  return Boolean(btn.querySelector?.('[class*="icon" i], [class*="symbol" i]')) && text.length <= 24;
+}
+
 /**
  * 在右侧辅助面板内寻找右上角控制栏（放置小恐龙图标触发按钮）。
  */
 export function findAuxToolbarContainer(auxPane) {
   if (!auxPane || typeof auxPane.getBoundingClientRect !== 'function') return null;
   const auxRect = auxPane.getBoundingClientRect();
-  const buttons = Array.from(auxPane.querySelectorAll('button')).filter((btn) => {
+  const urlInput = auxPane.querySelector?.('input[placeholder*="URL" i], input[placeholder*="Search" i]');
+  const inputRect = urlInput && typeof urlInput.getBoundingClientRect === 'function'
+    ? urlInput.getBoundingClientRect()
+    : null;
+  const hasVisibleInput = Boolean(inputRect && inputRect.width > 0 && inputRect.height > 0);
+
+  const iconButtons = Array.from(auxPane.querySelectorAll('button')).filter((btn) => {
     if (btn.closest?.(`[${ATTR_OVERLAY}]`)) return false;
     if (btn.hasAttribute?.(ATTR_TRIGGER)) return false;
     if (typeof btn.getBoundingClientRect !== 'function') return false;
     const r = btn.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0 || r.width > 48 || r.height > 48) return false;
-    const text = String(btn.textContent || '').trim();
-    if (text.length > 0) return false;
-    return r.top <= auxRect.top + 60 && r.left >= auxRect.right - 220;
+    if (!isIconOnlyButton(btn)) return false;
+    return r.left >= auxRect.right - 240;
   });
 
-  if (buttons.length === 0) return null;
-  buttons.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-  const anchorBtn = buttons[0];
+  if (iconButtons.length === 0) return null;
+
+  // 优先匹配与搜索框处于同一水平行的右侧按钮（如新标签页的 `⋮`）
+  let matched = [];
+  if (hasVisibleInput) {
+    const inputCenterY = inputRect.top + inputRect.height / 2;
+    matched = iconButtons.filter((btn) => {
+      const r = btn.getBoundingClientRect();
+      const btnCenterY = r.top + r.height / 2;
+      return Math.abs(btnCenterY - inputCenterY) <= 24 && r.left >= inputRect.right - 8;
+    });
+  }
+
+  // 回退到右侧面板顶部区域（放宽至 120px，兼容外层含 Tab 栏或内边距的容器）
+  if (matched.length === 0) {
+    matched = iconButtons.filter((btn) => btn.getBoundingClientRect().top <= auxRect.top + 120);
+  }
+
+  if (matched.length === 0) return null;
+  matched.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+  const anchorBtn = matched[0];
   return { container: anchorBtn.parentElement, beforeEl: anchorBtn };
 }
 

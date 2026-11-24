@@ -469,26 +469,56 @@ function hasAuxNewTabMenu(auxPane) {
   return false;
 }
 
+function isIconOnlyButton(btn) {
+  const text = String(btn.textContent || '').trim();
+  if (text.length === 0) return true;
+  // 兼容图标字体（如 google-symbols 的 more_vert）
+  return Boolean(btn.querySelector?.('[class*="icon" i], [class*="symbol" i]')) && text.length <= 24;
+}
+
 /**
  * 在右侧辅助面板内寻找右上角控制栏（放置小恐龙图标触发按钮）。
  */
 function findAuxToolbarContainer(auxPane) {
   if (!auxPane || typeof auxPane.getBoundingClientRect !== 'function') return null;
   const auxRect = auxPane.getBoundingClientRect();
-  const buttons = Array.from(auxPane.querySelectorAll('button')).filter((btn) => {
+  const urlInput = auxPane.querySelector?.('input[placeholder*="URL" i], input[placeholder*="Search" i]');
+  const inputRect = urlInput && typeof urlInput.getBoundingClientRect === 'function'
+    ? urlInput.getBoundingClientRect()
+    : null;
+  const hasVisibleInput = Boolean(inputRect && inputRect.width > 0 && inputRect.height > 0);
+
+  const iconButtons = Array.from(auxPane.querySelectorAll('button')).filter((btn) => {
     if (btn.closest?.(`[${ATTR_OVERLAY}]`)) return false;
     if (btn.hasAttribute?.(ATTR_TRIGGER)) return false;
     if (typeof btn.getBoundingClientRect !== 'function') return false;
     const r = btn.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0 || r.width > 48 || r.height > 48) return false;
-    const text = String(btn.textContent || '').trim();
-    if (text.length > 0) return false;
-    return r.top <= auxRect.top + 60 && r.left >= auxRect.right - 220;
+    if (!isIconOnlyButton(btn)) return false;
+    return r.left >= auxRect.right - 240;
   });
 
-  if (buttons.length === 0) return null;
-  buttons.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-  const anchorBtn = buttons[0];
+  if (iconButtons.length === 0) return null;
+
+  // 优先匹配与搜索框处于同一水平行的右侧按钮（如新标签页的 `⋮`）
+  let matched = [];
+  if (hasVisibleInput) {
+    const inputCenterY = inputRect.top + inputRect.height / 2;
+    matched = iconButtons.filter((btn) => {
+      const r = btn.getBoundingClientRect();
+      const btnCenterY = r.top + r.height / 2;
+      return Math.abs(btnCenterY - inputCenterY) <= 24 && r.left >= inputRect.right - 8;
+    });
+  }
+
+  // 回退到右侧面板顶部区域（放宽至 120px，兼容外层含 Tab 栏或内边距的容器）
+  if (matched.length === 0) {
+    matched = iconButtons.filter((btn) => btn.getBoundingClientRect().top <= auxRect.top + 120);
+  }
+
+  if (matched.length === 0) return null;
+  matched.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+  const anchorBtn = matched[0];
   return { container: anchorBtn.parentElement, beforeEl: anchorBtn };
 }
 
@@ -978,7 +1008,7 @@ function createDinoGameController(win, doc) {
 // --- entry.js ---
 /**
  * dino-game 运行时入口：
- * 在右侧辅助面板挂载谷歌小恐龙入口与透明背景覆盖层视图。
+ * 在右侧辅助面板挂载谷歌小恐龙入口与无边框覆盖层视图。
  */
 function installDinoGamePlugin(win = window, doc = document) {
   if (!win || !doc || win.__myAntigravityDinoGameInstalled) {
@@ -989,6 +1019,7 @@ function installDinoGamePlugin(win = window, doc = document) {
   const controller = createDinoGameController(win, doc);
   let observer = null;
   let scheduled = false;
+  let settleTimer = null;
 
   function scheduleSyncMount() {
     if (scheduled) return;
@@ -1004,6 +1035,17 @@ function installDinoGamePlugin(win = window, doc = document) {
     }
   }
 
+  function scheduleWithSettle() {
+    scheduleSyncMount();
+    if (typeof win.setTimeout === 'function') {
+      if (settleTimer) win.clearTimeout?.(settleTimer);
+      settleTimer = win.setTimeout(() => {
+        settleTimer = null;
+        controller.syncMount();
+      }, 180);
+    }
+  }
+
   function start() {
     controller.syncMount();
     if (typeof win.MutationObserver === 'function' && doc.body) {
@@ -1011,8 +1053,13 @@ function installDinoGamePlugin(win = window, doc = document) {
       observer.observe(doc.body, {
         childList: true,
         subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
       });
     }
+    doc.addEventListener?.('focusin', scheduleWithSettle);
+    doc.addEventListener?.('transitionend', scheduleSyncMount);
+    win.addEventListener?.('resize', scheduleSyncMount);
   }
 
   if (doc.readyState === 'loading') {
@@ -1024,7 +1071,11 @@ function installDinoGamePlugin(win = window, doc = document) {
   return {
     controller,
     destroy() {
+      if (settleTimer) win.clearTimeout?.(settleTimer);
       observer?.disconnect();
+      doc.removeEventListener?.('focusin', scheduleWithSettle);
+      doc.removeEventListener?.('transitionend', scheduleSyncMount);
+      win.removeEventListener?.('resize', scheduleSyncMount);
       controller.destroy();
     },
   };

@@ -23,6 +23,7 @@ import {
   triggerJump,
 } from '../plugins/dino-game/src/dino-core.js';
 import { getShortSummary } from '../plugins/mod-manager/src/manager-core.js';
+import { findAuxToolbarContainer } from '../plugins/dino-game/src/ui.js';
 
 test('dino-game 物理与跳跃/下蹲/P键暂停流程', () => {
   let state = createGameState();
@@ -144,6 +145,31 @@ test('dino-game mod.json 与 mod-manager 双语简介同步校验', () => {
   const fallbackMod = { id: 'dino-game', name: modJson.name };
   assert.equal(getShortSummary(fallbackMod, 'zh-CN'), '右侧辅助面板内嵌谷歌小恐龙小游戏');
   assert.equal(getShortSummary(fallbackMod, 'en'), 'Embedded Chrome Dino game in right aux pane');
+});
+
+test('findAuxToolbarContainer 兼容顶部带 Tab 栏偏移及 google-symbols 图标按钮', () => {
+  const toolbarContainer = { parentElement: null };
+  const moreBtn = {
+    textContent: 'more_vert',
+    parentElement: toolbarContainer,
+    closest: () => null,
+    hasAttribute: () => false,
+    querySelector: (sel) => (sel.includes('symbol') ? { className: 'google-symbols' } : null),
+    getBoundingClientRect: () => ({ top: 112, left: 1230, right: 1258, width: 28, height: 28 }),
+  };
+  const urlInput = {
+    getBoundingClientRect: () => ({ top: 108, left: 780, right: 1210, width: 430, height: 36 }),
+  };
+  const fakeAuxPane = {
+    getBoundingClientRect: () => ({ top: 32, left: 760, right: 1280, width: 520, height: 748 }),
+    querySelector: (sel) => (sel.includes('URL') ? urlInput : null),
+    querySelectorAll: (sel) => (sel === 'button' ? [moreBtn] : []),
+  };
+
+  const found = findAuxToolbarContainer(fakeAuxPane);
+  assert.ok(found);
+  assert.equal(found.container, toolbarContainer);
+  assert.equal(found.beforeEl, moreBtn);
 });
 
 test('dino-game 打包产物语法有效且可自包含执行', () => {
