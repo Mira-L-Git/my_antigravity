@@ -1,0 +1,10 @@
+{
+  "id": "file-link-color",
+  "name": "文件链接蓝色高亮 (File Link Color)",
+  "version": "0.1.0",
+  "enabled": true,
+  "css": "styles.css",
+  "summary": "聊天带图标文件名蓝色高亮",
+  "summaryEn": "Blue text for chat file links",
+  "description": "将聊天正文中带有文件图标（含普通文档 document.svg，排除文件夹）的文件名称及后缀高亮为 Antigravity 原生链接蓝，自动适配明暗主题。"
+}
