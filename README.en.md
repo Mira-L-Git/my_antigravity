@@ -26,6 +26,7 @@
 | **`session-status`** | Compact status bar under the chat composer showing **Turns / Steps / Latest TPS**, **Total Tokens & Cache Hit Rate** (plus optional estimated API cost when server cost summary is enabled), and **Context Window Usage** ring with category breakdown. Collapsible into a mini footer ring. |
 | **`model-enhancer`** | Replaces the model picker with a two-stage **Codex-style thinking-effort slider** (click, drag, keyboard, and reset-to-default) and a **brand-icon model list** (Gemini, Claude, GPT/OpenAI, DeepSeek, Grok, Qwen, Kimi, GLM/Zhipu, MiniMax, Hunyuan, MiMo, Muse, etc.) with smooth transitions and `Esc` back-navigation. |
 | **`quota-rings`** | Displays two neutral `22×22px` quota rings beside the bottom-left Settings button: **Other Built-in Models** (rounded square) and **Gemini** (circle). Supports 1:3 dual-window split (5h + weekly) with automatic single-window fallback, hover reset-time tooltips, and click-to-open Model Quota settings. |
+| **`file-link-color`** | Pure CSS plugin that highlights filenames (including extensions) of chat file links with file icons (including generic `document.svg`, excluding folders) in native link blue, adapting automatically to light/dark themes while preserving muted line-number suffixes (`#L...`) and file tree styling. |
 | **`mod-manager`** | Maps the top-left Antigravity logo button to a **Plugin Manager** popover (`Alt + Click` preserves the original home action). Lists mods with persistent switches (`mods-state.json`) and one-click window reload when changes are pending. |
 
 ---
@@ -71,6 +72,7 @@ my_antigravity/
 │   └── cli.mjs             # CLI (sync / install / uninstall / status)
 ├── plugins/                # Modular desktop plugins (one directory per plugin)
 │   ├── enter-newline/
+│   ├── file-link-color/
 │   ├── mod-manager/
 │   ├── model-enhancer/
 │   ├── quota-rings/
