@@ -18,7 +18,7 @@
   position: fixed;
   z-index: 9999;
   box-sizing: border-box;
-  width: 316px;
+  width: 332px;
   max-width: calc(100vw - 16px);
   border: 1px solid var(--ag-mm-border);
   border-radius: 12px;
@@ -51,6 +51,8 @@
 .ag-mm-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 11px 14px 10px;
   border-bottom: 1px solid var(--ag-mm-border);
 }
@@ -62,10 +64,90 @@
   line-height: 18px;
   color: var(--ag-mm-fg);
   letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.ag-mm-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.ag-mm-version {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ag-mm-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ag-mm-update-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--ag-mm-border);
+  border-radius: 6px;
+  background: var(--ag-mm-hover);
+  color: var(--ag-mm-fg);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.ag-mm-update-btn:hover:not(:disabled) {
+  border-color: rgba(128, 128, 140, 0.36);
+}
+
+.ag-mm-update-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.ag-mm-update-btn[data-state='has-update'] {
+  border-color: rgba(59, 130, 246, 0.42);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.ag-mm-github-icon,
+.ag-mm-external-icon {
+  flex: none;
+  display: block;
+}
+
+.ag-mm-update-notice {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--ag-mm-border);
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--ag-mm-muted);
+}
+
+.ag-mm-update-notice[data-tone='latest'] {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.ag-mm-update-notice[data-tone='available'] {
+  color: var(--ag-mm-accent);
+  background: rgba(59, 130, 246, 0.1);
+  font-weight: 500;
+}
+
+.ag-mm-update-notice[data-tone='error'] {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .ag-mm-switch:focus-visible,
-.ag-mm-reload-btn:focus-visible {
+.ag-mm-reload-btn:focus-visible,
+.ag-mm-update-btn:focus-visible {
   outline: 2px solid var(--ag-mm-accent);
   outline-offset: 1px;
 }

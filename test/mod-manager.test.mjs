@@ -6,9 +6,13 @@ import vm from 'node:vm';
 import { buildModManagerPlugin } from '../plugins/mod-manager/build.mjs';
 import {
   MIN_LOGO_SCORE,
+  compareVersions,
   computePendingReloadIds,
   filterDisplayMods,
+  formatVersionLabel,
   getShortSummary,
+  parseVersionTuple,
+  resolveCurrentVersion,
   resolveLocale,
   scoreLogoButtonCandidate,
   sortCatalogMods,
@@ -725,6 +729,175 @@ test('zh-cn 未开启时功能介绍与管理菜单文案显示为英文', async
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(root.querySelector('.ag-mm-badge')?.textContent, 'Restart');
   assert.equal(root.querySelector('.ag-mm-reload-btn')?.textContent, 'Reload');
+
+  controller.dispose();
+});
+
+test('版本号解析与从第一位到第三位依次比较规则正确', () => {
+  assert.deepEqual(parseVersionTuple('v1.0.0'), [1, 0, 0]);
+  assert.deepEqual(parseVersionTuple('1.2.10'), [1, 2, 10]);
+  assert.equal(parseVersionTuple('invalid'), null);
+
+  // 依次比较：第一位、第二位、第三位
+  assert.equal(compareVersions('1.0.0', '2.0.0'), -1);
+  assert.equal(compareVersions('1.0.0', '1.1.0'), -1);
+  assert.equal(compareVersions('1.0.0', '1.0.1'), -1);
+  assert.equal(compareVersions('1.9.9', '2.0.0'), -1);
+  assert.equal(compareVersions('1.10.0', '1.2.0'), 1);
+  assert.equal(compareVersions('v1.0.0', '1.0.0'), 0);
+  assert.equal(compareVersions('1.2.0', '1.1.9'), 1);
+  assert.equal(compareVersions('1.0.0', 'bad'), null);
+
+  assert.equal(formatVersionLabel('1.0.0'), 'v1.0.0');
+  assert.equal(resolveCurrentVersion({ appVersion: '1.2.3' }, []), 'v1.2.3');
+  assert.equal(resolveCurrentVersion({}, [{ id: 'mod-manager', version: '1.0.0' }]), 'v1.0.0');
+});
+
+test('mod-manager 主动检查更新：无被动请求、最新提示、发现新版本替换 GitHub 跳转按钮', async () => {
+  const { win, doc, FakeElement } = createFakeDom();
+  const { logoBtn } = buildSidebarWithTopLogo(doc, FakeElement);
+
+  let checkCount = 0;
+  let remoteVersion = '1.0.0';
+  const openedUrls = [];
+
+  const controller = createModManagerController(win, doc, {
+    bridge: {
+      bootEnabledIds: ['enter-newline', 'zh-cn', 'mod-manager'],
+      async getCatalog() {
+        return {
+          ok: true,
+          appVersion: '1.0.0',
+          bootEnabledIds: ['enter-newline', 'zh-cn', 'mod-manager'],
+          mods: [
+            { id: 'enter-newline', enabled: true, protected: false },
+            { id: 'mod-manager', version: '1.0.0', enabled: true, protected: true },
+          ],
+        };
+      },
+      async setModEnabled() {
+        return { ok: true, mods: [] };
+      },
+      async reloadWindow() {
+        return { ok: true };
+      },
+      async checkUpdate() {
+        checkCount += 1;
+        return {
+          ok: true,
+          currentVersion: '1.0.0',
+          latestVersion: remoteVersion,
+          hasUpdate: compareVersions('1.0.0', remoteVersion) === -1,
+          repoUrl: 'https://github.com/Mira-L-Git/my_antigravity',
+        };
+      },
+      async openExternal(url) {
+        openedUrls.push(url);
+        return { ok: true };
+      },
+    },
+  });
+
+  // 打开菜单时不应被动检查更新
+  doc.dispatchToElement(logoBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(checkCount, 0);
+
+  const root = doc.querySelector('[data-ag-mm-root="true"]');
+  const versionEl = root.querySelector('.ag-mm-version');
+  const updateBtn = root.querySelector('.ag-mm-update-btn');
+  const noticeEl = root.querySelector('.ag-mm-update-notice');
+  assert.equal(versionEl?.textContent, 'v1.0.0');
+  assert.equal(updateBtn?.textContent, '检查更新');
+  assert.equal(noticeEl?.hidden, true);
+
+  // 1. 远端仍为 1.0.0：点击检查更新 -> 提示“当前版本已是最新”
+  doc.dispatchToElement(updateBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(checkCount, 1);
+  assert.equal(noticeEl.hidden, false);
+  assert.equal(noticeEl.getAttribute('data-tone'), 'latest');
+  assert.equal(noticeEl.textContent, '当前版本已是最新');
+  assert.equal(updateBtn.textContent, '检查更新');
+
+  // 2. 远端升级为 1.1.0：再次点击检查更新 -> 显示新版本版号，按钮替换为 GitHub + 跳转图标
+  remoteVersion = '1.1.0';
+  doc.dispatchToElement(updateBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(checkCount, 2);
+  assert.equal(noticeEl.hidden, false);
+  assert.equal(noticeEl.getAttribute('data-tone'), 'available');
+  assert.equal(noticeEl.textContent, '发现新版本 v1.1.0');
+  assert.equal(updateBtn.getAttribute('data-state'), 'has-update');
+  assert.ok(updateBtn.querySelector('.ag-mm-github-icon'));
+  assert.equal(updateBtn.querySelector('.ag-mm-update-btn-label')?.textContent, 'GitHub');
+  assert.ok(updateBtn.querySelector('.ag-mm-external-icon'));
+
+  // 3. 再次点击替换后的 GitHub 按钮 -> 用默认浏览器打开 GitHub 项目，不再重复检查更新
+  doc.dispatchToElement(updateBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(checkCount, 2);
+  assert.deepEqual(openedUrls, ['https://github.com/Mira-L-Git/my_antigravity']);
+
+  controller.dispose();
+});
+
+test('mod-manager 无新桥接接口时可回退 fetch 检查更新与 window.open 打开 GitHub，并支持英文文案', async () => {
+  const { win, doc, FakeElement } = createFakeDom();
+  doc.documentElement.setAttribute('lang', 'en');
+  const { logoBtn } = buildSidebarWithTopLogo(doc, FakeElement);
+
+  const opened = [];
+  win.open = (url) => {
+    opened.push(url);
+  };
+  win.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { version: '1.0.1' };
+    },
+  });
+
+  const controller = createModManagerController(win, doc, {
+    bridge: {
+      bootEnabledIds: ['enter-newline', 'mod-manager'],
+      async getCatalog() {
+        return {
+          ok: true,
+          bootEnabledIds: ['enter-newline', 'mod-manager'],
+          mods: [
+            { id: 'enter-newline', enabled: true, protected: false },
+            { id: 'mod-manager', version: '1.0.0', enabled: true, protected: true },
+          ],
+        };
+      },
+      async setModEnabled() {
+        return { ok: true, mods: [] };
+      },
+      async reloadWindow() {
+        return { ok: true };
+      },
+    },
+  });
+
+  doc.dispatchToElement(logoBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+
+  const root = doc.querySelector('[data-ag-mm-root="true"]');
+  const updateBtn = root.querySelector('.ag-mm-update-btn');
+  const noticeEl = root.querySelector('.ag-mm-update-notice');
+  assert.equal(updateBtn.textContent, 'Check Updates');
+
+  doc.dispatchToElement(updateBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(noticeEl.hidden, false);
+  assert.equal(noticeEl.textContent, 'New version v1.0.1 available');
+  assert.equal(updateBtn.getAttribute('data-state'), 'has-update');
+
+  doc.dispatchToElement(updateBtn, 'click');
+  await new Promise((r) => setTimeout(r, 15));
+  assert.deepEqual(opened, ['https://github.com/Mira-L-Git/my_antigravity']);
 
   controller.dispose();
 });

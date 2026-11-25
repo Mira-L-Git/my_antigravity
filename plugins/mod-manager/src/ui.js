@@ -5,10 +5,16 @@
  * - 渲染原生 .surface-glass 风格的插件开关浮层并支持一键重载窗口。
  */
 import {
+  DEFAULT_APP_VERSION,
+  GITHUB_RAW_PACKAGE_URL,
+  GITHUB_REPO_URL,
   MIN_LOGO_SCORE,
+  compareVersions,
   computePendingReloadIds,
   filterDisplayMods,
+  formatVersionLabel,
   getShortSummary,
+  resolveCurrentVersion,
   resolveLocale,
   scoreLogoButtonCandidate,
   sortCatalogMods,
@@ -18,6 +24,13 @@ const COPY = {
   'zh-CN': {
     anchorTitle: 'My Antigravity 插件管理 (Alt + 点击触发原功能)',
     dialogLabel: 'My Antigravity 插件管理',
+    checkUpdateBtn: '检查更新',
+    checkingUpdateBtn: '检查中...',
+    githubBtn: 'GitHub',
+    githubBtnTitle: '在默认浏览器中打开 GitHub 项目',
+    updateLatest: '当前版本已是最新',
+    updateAvailable: (ver) => `发现新版本 ${ver}`,
+    updateError: '检查更新失败，请稍后重试',
     pendingBadge: '待重载',
     reloadBtn: '立即重载',
     reloadingBtn: '正在重载...',
@@ -37,6 +50,13 @@ const COPY = {
   en: {
     anchorTitle: 'My Antigravity Mods (Alt+Click for original action)',
     dialogLabel: 'My Antigravity Mod Manager',
+    checkUpdateBtn: 'Check Updates',
+    checkingUpdateBtn: 'Checking...',
+    githubBtn: 'GitHub',
+    githubBtnTitle: 'Open GitHub repository in default browser',
+    updateLatest: 'Current version is up to date',
+    updateAvailable: (ver) => `New version ${ver} available`,
+    updateError: 'Update check failed, please try again',
     pendingBadge: 'Restart',
     reloadBtn: 'Reload',
     reloadingBtn: 'Reloading...',
@@ -174,8 +194,59 @@ function createEl(doc, tag, attrs = {}, text = '') {
   return el;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function createSvgEl(doc, tag, attrs = {}) {
+  const el =
+    typeof doc.createElementNS === 'function' ? doc.createElementNS(SVG_NS, tag) : doc.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null) continue;
+    el.setAttribute(k, String(v));
+  }
+  return el;
+}
+
+function buildGithubButtonChildren(doc, labelText) {
+  const ghSvg = createSvgEl(doc, 'svg', {
+    class: 'ag-mm-github-icon',
+    viewBox: '0 0 16 16',
+    width: '12',
+    height: '12',
+    fill: 'currentColor',
+    'aria-hidden': 'true',
+  });
+  ghSvg.appendChild(
+    createSvgEl(doc, 'path', {
+      d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z',
+    }),
+  );
+
+  const label = createEl(doc, 'span', { class: 'ag-mm-update-btn-label' }, labelText);
+
+  const extSvg = createSvgEl(doc, 'svg', {
+    class: 'ag-mm-external-icon',
+    viewBox: '0 0 16 16',
+    width: '11',
+    height: '11',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '1.6',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+  });
+  extSvg.appendChild(createSvgEl(doc, 'path', { d: 'M6 3.5H3.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V10' }));
+  extSvg.appendChild(createSvgEl(doc, 'path', { d: 'M9.5 2.5h4v4' }));
+  extSvg.appendChild(createSvgEl(doc, 'path', { d: 'M13.5 2.5L7.5 8.5' }));
+
+  return [ghSvg, label, extSvg];
+}
+
 export function createModManagerController(win, doc, { bridge = null } = {}) {
   let root = null;
+  let versionEl = null;
+  let updateBtnEl = null;
+  let updateNoticeEl = null;
   let listEl = null;
   let errorEl = null;
   let footerEl = null;
@@ -185,6 +256,11 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
   let isOpen = false;
   let isLoading = false;
   let isReloading = false;
+  let isCheckingUpdate = false;
+  let updateState = 'idle';
+  let currentVersion = formatVersionLabel(DEFAULT_APP_VERSION);
+  let latestVersion = '';
+  let updateRepoUrl = GITHUB_REPO_URL;
   let errorMessage = '';
   let mods = [];
   const initialBridge = bridge || win.__myAntigravityManager || null;
@@ -379,7 +455,24 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
 
     const header = createEl(doc, 'div', { class: 'ag-mm-header' });
     const title = createEl(doc, 'h2', { class: 'ag-mm-title' }, 'My Antigravity');
+    const headerActions = createEl(doc, 'div', { class: 'ag-mm-header-actions' });
+    versionEl = createEl(doc, 'span', { class: 'ag-mm-version' }, currentVersion);
+    updateBtnEl = createEl(
+      doc,
+      'button',
+      { type: 'button', class: 'ag-mm-update-btn', 'data-state': 'idle' },
+      '检查更新',
+    );
+    updateBtnEl.addEventListener('click', () => {
+      void handleUpdateAction();
+    });
+    headerActions.appendChild(versionEl);
+    headerActions.appendChild(updateBtnEl);
     header.appendChild(title);
+    header.appendChild(headerActions);
+
+    updateNoticeEl = createEl(doc, 'div', { class: 'ag-mm-update-notice', role: 'status' });
+    updateNoticeEl.hidden = true;
 
     errorEl = createEl(doc, 'div', { class: 'ag-mm-error' });
     errorEl.hidden = true;
@@ -403,12 +496,59 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
     footerEl.appendChild(reloadBtnEl);
 
     root.appendChild(header);
+    root.appendChild(updateNoticeEl);
     root.appendChild(errorEl);
     root.appendChild(listEl);
     root.appendChild(footerEl);
 
     doc.body.appendChild(root);
     return root;
+  }
+
+  function renderUpdateControls(copy) {
+    if (!versionEl || !updateBtnEl || !updateNoticeEl) {
+      return;
+    }
+    versionEl.textContent = currentVersion;
+    updateBtnEl.setAttribute('data-state', updateState);
+
+    if (updateState === 'checking') {
+      updateBtnEl.disabled = true;
+      updateBtnEl.removeAttribute('title');
+      updateBtnEl.removeAttribute('aria-label');
+      updateBtnEl.textContent = copy.checkingUpdateBtn;
+      updateNoticeEl.hidden = true;
+      updateNoticeEl.textContent = '';
+      return;
+    }
+
+    updateBtnEl.disabled = false;
+    if (updateState === 'has-update') {
+      updateBtnEl.setAttribute('title', copy.githubBtnTitle);
+      updateBtnEl.setAttribute('aria-label', copy.githubBtnTitle);
+      updateBtnEl.replaceChildren(...buildGithubButtonChildren(doc, copy.githubBtn));
+      updateNoticeEl.hidden = false;
+      updateNoticeEl.setAttribute('data-tone', 'available');
+      updateNoticeEl.textContent = copy.updateAvailable(latestVersion);
+      return;
+    }
+
+    updateBtnEl.removeAttribute('title');
+    updateBtnEl.removeAttribute('aria-label');
+    updateBtnEl.textContent = copy.checkUpdateBtn;
+
+    if (updateState === 'up-to-date') {
+      updateNoticeEl.hidden = false;
+      updateNoticeEl.setAttribute('data-tone', 'latest');
+      updateNoticeEl.textContent = copy.updateLatest;
+    } else if (updateState === 'error') {
+      updateNoticeEl.hidden = false;
+      updateNoticeEl.setAttribute('data-tone', 'error');
+      updateNoticeEl.textContent = copy.updateError;
+    } else {
+      updateNoticeEl.hidden = true;
+      updateNoticeEl.textContent = '';
+    }
   }
 
   function render() {
@@ -431,6 +571,7 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
     const locale = getLocale();
     const copy = COPY[locale] || COPY.en;
     popup.setAttribute('aria-label', copy.dialogLabel);
+    renderUpdateControls(copy);
 
     const activeBridge = getBridge();
     const sorted = sortCatalogMods(filterDisplayMods(mods));
@@ -549,6 +690,7 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
       const res = await activeBridge.getCatalog();
       if (res && res.ok !== false && Array.isArray(res.mods)) {
         mods = res.mods;
+        currentVersion = resolveCurrentVersion(res, mods);
         if (Array.isArray(res.bootEnabledIds)) {
           bootEnabledIds = [...res.bootEnabledIds];
         } else if (!bootEnabledIds) {
@@ -561,6 +703,95 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
       errorMessage = err?.message || getCopy().loadError;
     } finally {
       isLoading = false;
+      render();
+    }
+  }
+
+  async function openGithubProject(url) {
+    const targetUrl = url || GITHUB_REPO_URL;
+    const activeBridge = getBridge();
+    if (activeBridge && typeof activeBridge.openExternal === 'function') {
+      try {
+        const res = await activeBridge.openExternal(targetUrl);
+        if (res && res.ok) {
+          return;
+        }
+      } catch {
+        // fallback below
+      }
+    }
+    win.open?.(targetUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function checkRemoteVersionFallback() {
+    if (typeof win.fetch !== 'function') {
+      return { ok: false, error: 'Fetch unavailable' };
+    }
+    const res = await win.fetch(`${GITHUB_RAW_PACKAGE_URL}?t=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (!res || !res.ok) {
+      return { ok: false, error: `HTTP ${res?.status || 'ERR'}` };
+    }
+    const pkg = await res.json();
+    const remoteRaw = pkg && typeof pkg.version === 'string' ? pkg.version : '';
+    const cmp = compareVersions(currentVersion, remoteRaw);
+    if (cmp === null) {
+      return { ok: false, error: 'Invalid remote version' };
+    }
+    return {
+      ok: true,
+      currentVersion,
+      latestVersion: formatVersionLabel(remoteRaw),
+      hasUpdate: cmp === -1,
+      repoUrl: GITHUB_REPO_URL,
+    };
+  }
+
+  async function handleUpdateAction() {
+    if (isCheckingUpdate) {
+      return;
+    }
+    if (updateState === 'has-update') {
+      await openGithubProject(updateRepoUrl);
+      return;
+    }
+
+    isCheckingUpdate = true;
+    updateState = 'checking';
+    render();
+
+    const activeBridge = getBridge();
+    try {
+      const res =
+        activeBridge && typeof activeBridge.checkUpdate === 'function'
+          ? await activeBridge.checkUpdate()
+          : await checkRemoteVersionFallback();
+
+      if (!res || !res.ok) {
+        updateState = 'error';
+        return;
+      }
+
+      if (res.currentVersion) {
+        currentVersion = formatVersionLabel(res.currentVersion);
+      }
+      const remoteLabel = res.latestVersion ? formatVersionLabel(res.latestVersion) : '';
+      const cmp = remoteLabel ? compareVersions(currentVersion, remoteLabel) : null;
+      const hasUpdate = cmp !== null ? cmp === -1 : Boolean(res.hasUpdate);
+
+      if (hasUpdate && remoteLabel) {
+        updateState = 'has-update';
+        latestVersion = remoteLabel;
+        updateRepoUrl = res.repoUrl || GITHUB_REPO_URL;
+      } else {
+        updateState = 'up-to-date';
+        latestVersion = '';
+      }
+    } catch {
+      updateState = 'error';
+    } finally {
+      isCheckingUpdate = false;
       render();
     }
   }
@@ -625,6 +856,9 @@ export function createModManagerController(win, doc, { bridge = null } = {}) {
   function close({ restoreFocus = false } = {}) {
     if (!isOpen) return;
     isOpen = false;
+    if (updateState === 'up-to-date' || updateState === 'error') {
+      updateState = 'idle';
+    }
     if (currentAnchor) {
       currentAnchor.setAttribute?.('data-ag-mm-open', 'false');
     }

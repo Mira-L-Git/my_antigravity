@@ -6,6 +6,7 @@
  * 并尊重 ~/.gemini/config/config.json 中的插件总开关。
  */
 const fs = require('fs');
+const https = require('https');
 const os = require('os');
 const path = require('path');
 
@@ -13,8 +14,15 @@ const CHANNEL = 'my-antigravity:get-mods-sync';
 const CHANNEL_GET_CATALOG = 'my-antigravity:get-mod-catalog';
 const CHANNEL_SET_ENABLED = 'my-antigravity:set-mod-enabled';
 const CHANNEL_RELOAD_WINDOW = 'my-antigravity:reload-window';
+const CHANNEL_CHECK_UPDATE = 'my-antigravity:check-update';
+const CHANNEL_OPEN_EXTERNAL = 'my-antigravity:open-external';
 const CHANNEL_GET_ATTENTION_BASE_ICON = 'my-antigravity:get-attention-base-icon';
 const CHANNEL_SET_ATTENTION_STATE = 'my-antigravity:set-attention-state';
+
+const GITHUB_REPO_URL = 'https://github.com/Mira-L-Git/my_antigravity';
+const GITHUB_RAW_PACKAGE_URL = 'https://raw.githubusercontent.com/Mira-L-Git/my_antigravity/main/package.json';
+const DEFAULT_APP_VERSION = '1.0.0';
+const UPDATE_CHECK_TIMEOUT_MS = 8000;
 
 const VALID_MOD_ID_RE = /^[a-z0-9][a-z0-9_-]*$/i;
 const MAX_PNG_DATA_URL_LEN = 512 * 1024;
@@ -210,10 +218,202 @@ function readMods(configDir = getConfigDir()) {
   return { enabled: true, mods };
 }
 
+function parseVersionTuple(version) {
+  if (typeof version !== 'string') {
+    return null;
+  }
+  const cleaned = version.trim().replace(/^v/i, '');
+  const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!match) {
+    return null;
+  }
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function normalizeVersion(version) {
+  const tuple = parseVersionTuple(version);
+  return tuple ? `${tuple[0]}.${tuple[1]}.${tuple[2]}` : DEFAULT_APP_VERSION;
+}
+
+function compareVersions(localVersion, remoteVersion) {
+  const a = parseVersionTuple(localVersion);
+  const b = parseVersionTuple(remoteVersion);
+  if (!a || !b) {
+    return null;
+  }
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
+
+function getAppVersion(configDir = getConfigDir()) {
+  const pluginManifestPath = path.join(getPluginRootDir(configDir), 'plugin.json');
+  try {
+    if (fs.existsSync(pluginManifestPath)) {
+      const raw = JSON.parse(fs.readFileSync(pluginManifestPath, 'utf8'));
+      if (raw && parseVersionTuple(raw.version)) {
+        return normalizeVersion(raw.version);
+      }
+    }
+  } catch {
+    // 忽略损坏的 plugin.json，继续回退
+  }
+
+  const managerMetaPath = path.join(getModsDir(configDir), 'mod-manager', 'mod.json');
+  try {
+    if (fs.existsSync(managerMetaPath)) {
+      const raw = JSON.parse(fs.readFileSync(managerMetaPath, 'utf8'));
+      if (raw && parseVersionTuple(raw.version)) {
+        return normalizeVersion(raw.version);
+      }
+    }
+  } catch {
+    // 忽略损坏的 mod.json，使用内置默认版本号
+  }
+
+  return DEFAULT_APP_VERSION;
+}
+
 function getModCatalog(configDir = getConfigDir()) {
   const pluginEnabled = isPluginEnabled(configDir);
   const mods = scanAllMods(configDir, { includeCode: false });
-  return { ok: true, pluginEnabled, mods };
+  const appVersion = getAppVersion(configDir);
+  return { ok: true, pluginEnabled, appVersion, mods };
+}
+
+function fetchJsonViaNodeHttps(url, timeoutMs = UPDATE_CHECK_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache',
+          'User-Agent': 'my-antigravity-updater',
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const status = Number(res.statusCode || 0);
+        if (status < 200 || status >= 300) {
+          res.resume();
+          reject(new Error(`HTTP ${status || 'ERR'}`));
+          return;
+        }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body));
+          } catch {
+            reject(new Error('Invalid JSON response'));
+          }
+        });
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy(new Error('Request timed out'));
+    });
+    req.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs = UPDATE_CHECK_TIMEOUT_MS) {
+  const { net } = getElectron();
+  // 优先使用 Electron net.fetch，自动复用系统/客户端代理设置
+  if (net && typeof net.fetch === 'function') {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const res = await net.fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+        cache: 'no-store',
+        signal: controller ? controller.signal : undefined,
+      });
+      if (!res || !res.ok) {
+        throw new Error(`HTTP ${res?.status || 'ERR'}`);
+      }
+      return await res.json();
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+  return fetchJsonViaNodeHttps(url, timeoutMs);
+}
+
+async function checkForUpdates({ configDir = getConfigDir(), fetchJson } = {}) {
+  const currentVersion = getAppVersion(configDir);
+  const requestUrl = `${GITHUB_RAW_PACKAGE_URL}?t=${Date.now()}`;
+  try {
+    const pkg = fetchJson ? await fetchJson(requestUrl) : await fetchJsonWithTimeout(requestUrl);
+    const remoteRaw = pkg && typeof pkg.version === 'string' ? pkg.version : '';
+    const cmp = compareVersions(currentVersion, remoteRaw);
+    if (cmp === null) {
+      return {
+        ok: false,
+        currentVersion,
+        error: '无法解析远端版本号',
+      };
+    }
+    const latestVersion = normalizeVersion(remoteRaw);
+    return {
+      ok: true,
+      currentVersion,
+      latestVersion,
+      hasUpdate: cmp === -1,
+      repoUrl: GITHUB_REPO_URL,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      currentVersion,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+function isAllowedGithubUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ''));
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname === 'github.com' &&
+      (parsed.pathname === '/Mira-L-Git/my_antigravity' ||
+        parsed.pathname.startsWith('/Mira-L-Git/my_antigravity/'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function openExternalUrl(rawUrl = GITHUB_REPO_URL) {
+  const target = rawUrl || GITHUB_REPO_URL;
+  if (!isAllowedGithubUrl(target)) {
+    return { ok: false, error: '不允许打开非项目白名单链接' };
+  }
+  const { shell } = getElectron();
+  if (!shell || typeof shell.openExternal !== 'function') {
+    return { ok: false, error: '当前环境不支持打开外部浏览器' };
+  }
+  try {
+    await shell.openExternal(target);
+    return { ok: true, url: target };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 function setModEnabled(id, enabled, configDir = getConfigDir()) {
@@ -622,6 +822,26 @@ function registerMyAntigravityLoader() {
         }
       });
 
+      ipcMain.removeHandler?.(CHANNEL_CHECK_UPDATE);
+      ipcMain.handle(CHANNEL_CHECK_UPDATE, async () => {
+        try {
+          return await checkForUpdates();
+        } catch (err) {
+          console.error('[my_antigravity] Failed to check updates:', err);
+          return { ok: false, currentVersion: getAppVersion(), error: err?.message || String(err) };
+        }
+      });
+
+      ipcMain.removeHandler?.(CHANNEL_OPEN_EXTERNAL);
+      ipcMain.handle(CHANNEL_OPEN_EXTERNAL, async (_event, payload) => {
+        try {
+          return await openExternalUrl(payload?.url || GITHUB_REPO_URL);
+        } catch (err) {
+          console.error('[my_antigravity] Failed to open external url:', err);
+          return { ok: false, error: err?.message || String(err) };
+        }
+      });
+
       ipcMain.removeHandler?.(CHANNEL_GET_ATTENTION_BASE_ICON);
       ipcMain.handle(CHANNEL_GET_ATTENTION_BASE_ICON, () => {
         try {
@@ -729,6 +949,11 @@ module.exports = {
   readMods,
   scanAllMods,
   getModCatalog,
+  getAppVersion,
+  parseVersionTuple,
+  compareVersions,
+  checkForUpdates,
+  openExternalUrl,
   setModEnabled,
   readModsState,
   writeModsState,

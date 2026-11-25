@@ -21,6 +21,8 @@ function installMyAntigravityDesktopMods() {
       setModEnabled: (id, enabled) =>
         electron_1.ipcRenderer.invoke('my-antigravity:set-mod-enabled', { id, enabled }),
       reloadWindow: () => electron_1.ipcRenderer.invoke('my-antigravity:reload-window'),
+      checkUpdate: () => electron_1.ipcRenderer.invoke('my-antigravity:check-update'),
+      openExternal: (url) => electron_1.ipcRenderer.invoke('my-antigravity:open-external', { url }),
     };
     const attentionApi = {
       getBaseIcon: () => electron_1.ipcRenderer.invoke('my-antigravity:get-attention-base-icon'),

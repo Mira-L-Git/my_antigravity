@@ -45,6 +45,66 @@ const SHORT_SUMMARY_BY_ID = {
 };
 
 export const MIN_LOGO_SCORE = 4;
+export const DEFAULT_APP_VERSION = '1.0.0';
+export const GITHUB_REPO_URL = 'https://github.com/Mira-L-Git/my_antigravity';
+export const GITHUB_RAW_PACKAGE_URL =
+  'https://raw.githubusercontent.com/Mira-L-Git/my_antigravity/main/package.json';
+
+/**
+ * 解析三段式版本号（支持可选 v 前缀），失败返回 null。
+ */
+export function parseVersionTuple(version) {
+  if (typeof version !== 'string') {
+    return null;
+  }
+  const cleaned = version.trim().replace(/^v/i, '');
+  const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!match) {
+    return null;
+  }
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/**
+ * 按「第一位 -> 第二位 -> 第三位」顺序比较版本号：
+ * local < remote 返回 -1，相等返回 0，local > remote 返回 1，无法解析返回 null。
+ */
+export function compareVersions(localVersion, remoteVersion) {
+  const a = parseVersionTuple(localVersion);
+  const b = parseVersionTuple(remoteVersion);
+  if (!a || !b) {
+    return null;
+  }
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
+
+/**
+ * 统一格式化为带 v 前缀的三段式版本号。
+ */
+export function formatVersionLabel(version) {
+  const tuple = parseVersionTuple(version);
+  return tuple ? `v${tuple[0]}.${tuple[1]}.${tuple[2]}` : `v${DEFAULT_APP_VERSION}`;
+}
+
+/**
+ * 从插件目录响应中解析当前总版本号（优先主进程返回的 appVersion）。
+ */
+export function resolveCurrentVersion(catalog, mods) {
+  if (catalog && parseVersionTuple(catalog.appVersion)) {
+    return formatVersionLabel(catalog.appVersion);
+  }
+  if (Array.isArray(mods)) {
+    const manager = mods.find((m) => m && m.id === 'mod-manager');
+    if (manager && parseVersionTuple(manager.version)) {
+      return formatVersionLabel(manager.version);
+    }
+  }
+  return formatVersionLabel(DEFAULT_APP_VERSION);
+}
 
 /**
  * 判断当前是否使用中文界面：

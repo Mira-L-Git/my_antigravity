@@ -58,8 +58,12 @@ test('writePatchedAsar 与 installLoader/uninstallLoader 对真实 app.asar 副�
     assert.match(preload1, /MY_ANTIGRAVITY_LOADER_START/);
     assert.match(preload1, /__myAntigravityManager/);
     assert.match(preload1, /__myAntigravityAttention/);
+    assert.match(preload1, /checkUpdate/);
+    assert.match(preload1, /openExternal/);
     assert.match(loader1, /my-antigravity:get-mods-sync/);
     assert.match(loader1, /my-antigravity:set-mod-enabled/);
+    assert.match(loader1, /my-antigravity:check-update/);
+    assert.match(loader1, /my-antigravity:open-external/);
     assert.match(loader1, /my-antigravity:set-attention-state/);
     // 验证关键非修改文件的 offset 与 size 仍可读
     assert.ok(getAsarFile(patched1, 'package.json').toString('utf8').includes('"antigravity"'));
@@ -93,7 +97,9 @@ test('syncPlugins 同步到目标目录并生成合法 plugin.json', () => {
     const res = syncPlugins({ targetDir: tmpDir });
     assert.ok(res.synced.includes('enter-newline'));
     const manifest = JSON.parse(fs.readFileSync(path.join(tmpDir, 'plugin.json'), 'utf8'));
+    const repoPkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
     assert.equal(manifest.name, 'my_antigravity');
+    assert.equal(manifest.version, repoPkg.version);
     assert.equal(manifest.logo, 'assets/logo.svg');
     assert.ok(fs.existsSync(path.join(tmpDir, 'assets', 'logo.svg')));
     assert.ok(fs.existsSync(path.join(tmpDir, 'desktop-mods', 'enter-newline', 'index.js')));
@@ -351,4 +357,37 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
   // wc1 关闭销毁后，托盘自动回落为 wc2 的黄点
   wc1Listeners.get('destroyed')?.();
   assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_YELLOW');
+});
+
+test('main-hook: 支持读取 plugin.json 版本号、远端版本比对及白名单打开 GitHub', async () => {
+  const tmpConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'my-agy-update-test-'));
+  try {
+    const pluginTarget = path.join(tmpConfigDir, 'plugins', 'my_antigravity');
+    syncPlugins({ targetDir: pluginTarget });
+
+    assert.equal(mainHook.getAppVersion(tmpConfigDir), '1.0.0');
+    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, '1.0.0');
+
+    const latestRes = await mainHook.checkForUpdates({
+      configDir: tmpConfigDir,
+      fetchJson: async () => ({ version: '1.0.0' }),
+    });
+    assert.equal(latestRes.ok, true);
+    assert.equal(latestRes.hasUpdate, false);
+    assert.equal(latestRes.currentVersion, '1.0.0');
+    assert.equal(latestRes.latestVersion, '1.0.0');
+
+    const newerPatchRes = await mainHook.checkForUpdates({
+      configDir: tmpConfigDir,
+      fetchJson: async () => ({ version: '1.0.2' }),
+    });
+    assert.equal(newerPatchRes.ok, true);
+    assert.equal(newerPatchRes.hasUpdate, true);
+    assert.equal(newerPatchRes.latestVersion, '1.0.2');
+
+    const badUrlRes = await mainHook.openExternalUrl('https://evil.example.com');
+    assert.equal(badUrlRes.ok, false);
+  } finally {
+    fs.rmSync(tmpConfigDir, { recursive: true, force: true });
+  }
 });

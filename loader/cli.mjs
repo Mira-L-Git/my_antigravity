@@ -45,6 +45,18 @@ function stripMarkedBlock(text, startMarker, endMarker) {
   return before + '\n' + after;
 }
 
+export function getRepoVersion(repoRoot = REPO_ROOT) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    if (pkg && typeof pkg.version === 'string' && pkg.version.trim()) {
+      return pkg.version.trim();
+    }
+  } catch {
+    // 读取失败时回退默认版本
+  }
+  return '1.0.0';
+}
+
 /**
  * 将工作区 plugins/* 同步到 Antigravity 全局插件目录 ~/.gemini/config/plugins/my_antigravity/
  */
@@ -64,7 +76,7 @@ export function syncPlugins({ sourceDir = path.join(REPO_ROOT, 'plugins'), targe
   const pluginManifest = {
     name: 'my_antigravity',
     displayName: 'My Antigravity',
-    version: '0.1.0',
+    version: getRepoVersion(),
     description: 'Custom desktop UI and UX enhancements for Antigravity (e.g., Enter for newline, Shift+Enter to send, Simplified Chinese UI).',
     ...(hasLogo ? { logo: 'assets/logo.svg' } : {}),
   };
