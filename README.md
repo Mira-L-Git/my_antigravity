@@ -2,7 +2,7 @@
   <img src="assets/logo.svg" alt="My Antigravity Logo" width="84" height="84" />
   <h1>My Antigravity (<code>my_antigravity</code>)</h1>
   <p>面向 <strong>Antigravity 桌面版（Electron）</strong> 的模块化插件加载器与 UI/UX 增强套件。</p>
-  <p><strong>简体中文</strong> | <a href="README.en.md">English</a></p>
+  <p><strong>简体中文</strong> | <a href="README.en.md">English</a> | <a href="CHANGELOG.md">更新日志</a></p>
 </div>
 
 ---
@@ -14,6 +14,8 @@
 - **零外部 npm 依赖**：加载器与构建脚本完全基于原生 Node.js（含 ASAR 读写与 SHA-256 完整性校验重算）。
 - **无损备份与一键还原**：安装时自动备份原始 `app.asar` 为 `app.asar.my_antigravity.bak`，卸载即可完整恢复。
 - **独立开关持久化**：通过内置 `mod-manager` 在界面内独立开关各个小插件，状态保存于 `mods-state.json`，不会因 `npm run sync` 被覆盖。
+
+> 版本迭代记录详见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ---
 

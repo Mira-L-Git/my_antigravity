@@ -2,7 +2,7 @@
   <img src="assets/logo.svg" alt="My Antigravity Logo" width="84" height="84" />
   <h1>My Antigravity (<code>my_antigravity</code>)</h1>
   <p>Modular desktop UX &amp; UI plugin loader and enhancement suite for the <strong>Antigravity</strong> Electron desktop app.</p>
-  <p><a href="README.md">简体中文</a> | <strong>English</strong></p>
+  <p><a href="README.md">简体中文</a> | <strong>English</strong> | <a href="CHANGELOG.en.md">Changelog</a></p>
 </div>
 
 ---
@@ -14,6 +14,8 @@
 - **Zero external npm dependencies** — built with pure Node.js (ASAR parser + SHA-256 integrity recalculation + IPC bridge).
 - **Non-destructive & reversible** — backs up original `app.asar` to `app.asar.my_antigravity.bak` and supports clean one-click uninstall.
 - **Independent plugin toggles** — enable or disable individual mods directly inside the app via `mod-manager`, without overwriting preferences on `npm run sync`.
+
+> See [`CHANGELOG.en.md`](CHANGELOG.en.md) for release notes.
 
 ---
 
