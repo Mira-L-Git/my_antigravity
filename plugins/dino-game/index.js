@@ -389,9 +389,8 @@ const DINO_ICON_SVG =
 const LABELS = {
   'zh-CN': {
     toolbarTitle: '谷歌小恐龙',
-    headerTitle: '谷歌小恐龙',
     scoreLabel: '当前',
-    close: '关闭',
+    exit: '退出',
     idleHint: '按 空格 / ↑ 或点击画面开始',
     pausedHint: '已暂停 · 按 P 或点击画面继续',
     gameoverHint: '游戏结束 · 按 空格 或点击重来',
@@ -401,9 +400,8 @@ const LABELS = {
   },
   en: {
     toolbarTitle: 'Chrome Dino',
-    headerTitle: 'Chrome Dino',
     scoreLabel: 'SCORE',
-    close: 'Close',
+    exit: 'Exit',
     idleHint: 'Press Space / ↑ or Click to Start',
     pausedHint: 'Paused · Press P or Click to Resume',
     gameoverHint: 'GAME OVER · Space or Click to Retry',
@@ -802,42 +800,33 @@ function createDinoGameController(win, doc) {
     overlay.setAttribute(ATTR_NO_TRANSLATE, '1');
     overlay.setAttribute('tabindex', '0');
 
-    const header = doc.createElement('div');
-    header.className = 'my-antigravity-dino-header';
-
-    const titleGroup = doc.createElement('div');
-    titleGroup.className = 'my-antigravity-dino-title-group';
-    titleGroup.innerHTML = DINO_ICON_SVG;
-    const titleSpan = doc.createElement('span');
-    titleSpan.textContent = t.headerTitle;
-    titleGroup.appendChild(titleSpan);
-
-    const actions = doc.createElement('div');
-    actions.className = 'my-antigravity-dino-actions';
-
-    const closeBtn = doc.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'my-antigravity-dino-icon-btn';
-    closeBtn.textContent = t.close;
-    closeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeOverlay();
-    });
-
-    actions.appendChild(closeBtn);
-    header.appendChild(titleGroup);
-    header.appendChild(actions);
-
     const stage = doc.createElement('div');
     stage.className = 'my-antigravity-dino-stage';
 
     const scoreboard = doc.createElement('div');
     scoreboard.className = 'my-antigravity-dino-scoreboard';
     const scoreWrap = doc.createElement('span');
+    scoreWrap.className = 'my-antigravity-dino-score';
     scoreWrap.textContent = `${t.scoreLabel} `;
     const scoreVal = doc.createElement('strong');
     scoreWrap.appendChild(scoreVal);
+
+    const exitBtn = doc.createElement('button');
+    exitBtn.type = 'button';
+    exitBtn.className = 'my-antigravity-dino-exit-btn';
+    exitBtn.title = 'Esc';
+    exitBtn.setAttribute('aria-label', t.exit);
+    exitBtn.textContent = t.exit;
+    exitBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
+    exitBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeOverlay();
+    });
+
     scoreboard.appendChild(scoreWrap);
+    scoreboard.appendChild(exitBtn);
 
     const canvasWrap = doc.createElement('div');
     canvasWrap.className = 'my-antigravity-dino-canvas-wrap';
@@ -874,7 +863,6 @@ function createDinoGameController(win, doc) {
     stage.appendChild(canvasWrap);
     stage.appendChild(hint);
 
-    overlay.appendChild(header);
     overlay.appendChild(stage);
 
     overlay.addEventListener('keydown', (e) => {
