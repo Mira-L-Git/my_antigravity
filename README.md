@@ -62,14 +62,6 @@ npm run uninstall-loader  # 卸载加载器并恢复原始 app.asar（Windows �
 > - 日常仅修改 `plugins/` 下的小插件时，运行 `npm run sync` 并重启 Antigravity 窗口即可，无需重装加载器；若更新涉及 `loader/`（如新增主进程 IPC 桥接），需完全退出客户端后运行一次 `npm run install-loader`。
 > - 当 Antigravity 官方自动升级覆盖 `app.asar` 后，完全退出客户端并重新运行一次 `install.cmd`（或 `npm run install-loader`）即可恢复；`mods-state.json` 中的开关偏好会自动保留。
 
-### 版本号规范（当前 `v1.0.0`）
-本项目采用三段式版本号 `X.Y.Z`（记录于 [`package.json`](package.json)，`npm run sync` 会自动同步至 `plugin.json`）：
-1. **第一位（`X`）**：重大更新（由维护者判定）时 `+1`
-2. **第二位（`Y`）**：新增插件时 `+1`
-3. **第三位（`Z`）**：现有插件维护与小更新时 `+1`
-
-`mod-manager` 检查更新时按第一位到第三位依次进行数值比较，当本地版本小于 GitHub `main` 分支 `package.json` 中的版本时判定为非最新版本。
-
 ---
 
 ## 目录结构

@@ -62,14 +62,6 @@ npm run uninstall-loader  # Restore original app.asar (or double-click uninstall
 > - For regular edits under `plugins/`, run `npm run sync` and reload the window without reinstalling the loader; if changes touch `loader/` (e.g., new main-process IPC bridges), quit Antigravity completely and run `npm run install-loader` once.
 > - When Antigravity auto-updates and replaces `app.asar`, simply quit Antigravity and re-run `npm run install-loader` (or `install.cmd`). Your `mods-state.json` toggle preferences will be preserved.
 
-### Versioning Convention (Current `v1.0.0`)
-The suite uses a three-part version `X.Y.Z` defined in [`package.json`](package.json) (automatically written to `plugin.json` during `npm run sync`):
-1. **Major (`X`)**: Incremented for major releases (decided by the maintainer)
-2. **Minor (`Y`)**: Incremented when a new plugin is added
-3. **Patch (`Z`)**: Incremented for plugin maintenance and minor updates
-
-When checking for updates, `mod-manager` compares `X`, `Y`, and `Z` numerically in order against `package.json` on GitHub `main`.
-
 ---
 
 ## Project Structure
