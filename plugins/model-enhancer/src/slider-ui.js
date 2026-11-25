@@ -611,12 +611,14 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
 
       const baseName =
         effortGroupEl.getAttribute('data-model-base') || effortGroupEl.textContent?.trim() || '';
-      const efforts = getAvailableEfforts(baseName, fiberInfo.ctx.effortIndex);
+      const groupedModels = fiberInfo.ctx.userStatus?.cascadeModelConfigData?.groupedModels;
+      const efforts = getAvailableEfforts(baseName, fiberInfo.ctx.effortIndex, groupedModels);
       if (efforts.length < 2) return;
 
       const currentParsed = resolveBaseAndEffort(
         fiberInfo.ctx.selectedModel,
         fiberInfo.ctx.effortIndex,
+        groupedModels,
       );
       const preferredEffort =
         currentParsed?.base === baseName ? currentParsed.effort : getDefaultEffort(efforts);
@@ -674,10 +676,26 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
       panelEl.addEventListener(hoverType, handlePanelHoverCapture, true);
     }
 
+    function buildRowMeta(modelObj, fallback = {}) {
+      return {
+        base: fallback.base,
+        label: modelObj?.label || fallback.label || '',
+        displayName: modelObj?.displayName,
+        modelId: modelObj?.modelId,
+        modelAlias: modelObj?.modelAlias,
+        modelOrAlias: modelObj?.modelOrAlias,
+        provider: modelObj?.provider,
+      };
+    }
+
     function injectRowIcon(container, meta) {
       if (!container) return;
       const brandId = resolveBrandId(meta);
       const existing = container.querySelector(':scope > [data-ag-me-icon]');
+      if (!brandId) {
+        if (existing) existing.remove();
+        return;
+      }
       if (existing) {
         if (existing.getAttribute('data-ag-me-icon') === brandId) {
           return;
@@ -691,32 +709,23 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
     }
 
     function enhanceModelRows() {
-      // 1. 多档位模型组（位于 lU 的内部 flex span 中）
+      // 1. 多档位模型组（位于 HW 的内部 flex span 中）
       for (const groupEl of panelEl.querySelectorAll('[data-testid="model-selector-effort-group"]')) {
         const container = groupEl.parentElement;
         const item = groupEl.closest('[role="menuitem"]');
         const modelObj = inspectModelItemFiber(item || groupEl);
         const base = groupEl.getAttribute('data-model-base') || groupEl.textContent?.trim() || '';
-        injectRowIcon(container, {
-          base,
-          label: modelObj?.label || base,
-          modelId: modelObj?.modelId,
-          modelAlias: modelObj?.modelAlias,
-        });
+        injectRowIcon(container, buildRowMeta(modelObj, { base, label: base }));
       }
 
-      // 2. 单变体模型与自定义模型
+      // 2. 单变体模型、自定义模型与新版 Orchestrator 协调器行
       for (const itemEl of panelEl.querySelectorAll(
-        '[data-testid="model-selector-item"], [data-testid="model-selector-custom-item"]',
+        '[data-testid="model-selector-item"], [data-testid="model-selector-custom-item"], [data-testid="model-selector-orchestrator"]',
       )) {
         const container = itemEl.querySelector(':scope > span') || itemEl;
         const modelObj = inspectModelItemFiber(itemEl);
         const label = itemEl.getAttribute('data-model-label') || itemEl.textContent?.trim() || '';
-        injectRowIcon(container, {
-          label: modelObj?.label || label,
-          modelId: modelObj?.modelId,
-          modelAlias: modelObj?.modelAlias,
-        });
+        injectRowIcon(container, buildRowMeta(modelObj, { label }));
       }
 
       // 3. Best of N 模式下的复选模型行
@@ -724,11 +733,17 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
         const container = checkItem.querySelector(':scope > span') || checkItem;
         const modelObj = inspectModelItemFiber(checkItem);
         const label = checkItem.textContent?.trim() || '';
-        injectRowIcon(container, {
-          label: modelObj?.label || label,
-          modelId: modelObj?.modelId,
-          modelAlias: modelObj?.modelAlias,
-        });
+        injectRowIcon(container, buildRowMeta(modelObj, { label }));
+      }
+
+      // 4. Orchestrator 右侧规划器子菜单行（Portal 挂载于 document 内）
+      for (const pickerRow of doc.querySelectorAll('[data-testid="orchestrator-picker-row"]')) {
+        const container = pickerRow.querySelector(':scope > span') || pickerRow;
+        const modelObj = inspectModelItemFiber(pickerRow);
+        const base = pickerRow.getAttribute('data-model-base') || '';
+        const label =
+          pickerRow.getAttribute('data-model-label') || base || pickerRow.textContent?.trim() || '';
+        injectRowIcon(container, buildRowMeta(modelObj, { base, label }));
       }
     }
 
@@ -798,9 +813,12 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
         sliderView.hidden = false;
         listHeader.hidden = true;
 
-        const parsed = resolveBaseAndEffort(selectedModel, ctx.effortIndex);
+        const groupedModels = ctx.userStatus?.cascadeModelConfigData?.groupedModels;
+        const parsed = resolveBaseAndEffort(selectedModel, ctx.effortIndex, groupedModels);
         currentBaseName = parsed?.base || selectedModel.label || '';
-        currentEfforts = parsed ? getAvailableEfforts(parsed.base, ctx.effortIndex) : [];
+        currentEfforts = parsed
+          ? getAvailableEfforts(parsed.groupKey || parsed.base, ctx.effortIndex, groupedModels)
+          : [];
 
         modelSwitchName.textContent = currentBaseName;
         modelSwitchBtn.setAttribute('aria-label', copy.switchModelAria);

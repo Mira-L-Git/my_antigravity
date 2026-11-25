@@ -15,9 +15,14 @@ export function installModelEnhancerPlugin(win = window, doc = document, iconsMa
 
   function nodeTouchesModelPanel(node) {
     if (!node || node.nodeType !== 1) return false;
-    if (node.getAttribute?.('data-testid') === 'model-selector-panel') return true;
-    if (node.closest?.('[data-testid="model-selector-panel"]')) return true;
-    return Boolean(node.querySelector?.('[data-testid="model-selector-panel"]'));
+    const testId = node.getAttribute?.('data-testid');
+    if (testId === 'model-selector-panel' || testId === 'orchestrator-picker-row') return true;
+    if (node.closest?.('[data-testid="model-selector-panel"], [data-testid="orchestrator-picker-row"]')) {
+      return true;
+    }
+    return Boolean(
+      node.querySelector?.('[data-testid="model-selector-panel"], [data-testid="orchestrator-picker-row"]'),
+    );
   }
 
   function initDom() {

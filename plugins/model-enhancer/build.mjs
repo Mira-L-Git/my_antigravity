@@ -38,7 +38,7 @@ export function buildModelEnhancerPlugin() {
   const outPath = path.join(__dirname, 'index.js');
 
   const iconsMap = loadIconsMap();
-  const files = ['model-core.js', 'slider-ui.js', 'entry.js'];
+  const files = ['icon-registry.js', 'model-core.js', 'slider-ui.js', 'entry.js'];
   const chunks = files.map((file) => {
     const raw = fs.readFileSync(path.join(srcDir, file), 'utf8');
     return `// --- ${file} ---\n${stripModuleSyntax(raw).trim()}`;

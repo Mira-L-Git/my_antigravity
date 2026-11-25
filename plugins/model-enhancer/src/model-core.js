@@ -2,6 +2,12 @@
  * model-enhancer 纯函数核心模块：
  * 负责思考档位解析、品牌图标匹配与 SVG 实例 ID 去重，无 DOM / Node 依赖。
  */
+import {
+  BRAND_ICON_RULES,
+  DISABLED_MODEL_PATTERNS,
+  MODEL_ICON_OVERRIDES,
+  PROVIDER_ICON_MAP,
+} from './icon-registry.js';
 
 export const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -24,32 +30,6 @@ export const EFFORT_LABELS = {
 
 const EFFORT_SUFFIX_RE = /^(.*?)\s*\((low|medium|high|xhigh|max)(?:\s+thinking)?\)\s*$/i;
 
-const PROVIDER_ENUM_MAP = [
-  ['anthropic', 'anthropic'],
-  ['google', 'gemini'],
-  ['openai', 'openai'],
-  ['deepseek', 'deepseek'],
-  ['xai', 'grok'],
-  ['glm', 'zhipu'],
-  ['zhipu', 'zhipu'],
-  ['kimi', 'kimi'],
-];
-
-const BRAND_RULES = [
-  { id: 'deepseek', test: (s) => s.includes('deepseek') },
-  { id: 'anthropic', test: (s) => /\b(?:claude|anthropic|sonnet|opus|haiku)\b/.test(s) || s.includes('claude') || s.includes('anthropic') },
-  { id: 'gemini', test: (s) => s.includes('gemini') || s.includes('gemma') || /\b(?:palm|bard)\b/.test(s) },
-  { id: 'grok', test: (s) => s.includes('grok') || /(?:^|[^a-z0-9])xai(?:$|[^a-z0-9])/.test(s) },
-  { id: 'mimo', test: (s) => s.includes('mimo') || s.includes('xiaomi') },
-  { id: 'kimi', test: (s) => s.includes('kimi') || s.includes('moonshot') },
-  { id: 'minimax', test: (s) => s.includes('minimax') },
-  { id: 'qwen', test: (s) => s.includes('qwen') || s.includes('qwq') },
-  { id: 'hunyuan', test: (s) => s.includes('hunyuan') || s.includes('tencent') || /(?:^|[^a-z0-9])hy3(?:$|[^a-z0-9])/.test(s) },
-  { id: 'muse', test: (s) => /\bmuse\b/.test(s) || s.includes('muse-spark') || s.includes('llama') },
-  { id: 'zhipu', test: (s) => s.includes('zhipu') || s.includes('chatglm') || /(?:^|[^a-z0-9])glm(?:$|[^a-z0-9])/.test(s) },
-  { id: 'openai', test: (s) => s.includes('openai') || s.includes('gpt') || s.includes('codex') || /(?:^|[^a-z0-9])o[134](?:$|[^a-z0-9])/.test(s) },
-];
-
 export function parseEffortLabel(label) {
   if (typeof label !== 'string') return null;
   const match = EFFORT_SUFFIX_RE.exec(label.trim());
@@ -60,36 +40,81 @@ export function parseEffortLabel(label) {
   return { base, effort };
 }
 
-export function resolveBaseAndEffort(option, effortIndex) {
-  if (!option || option.isCustom) return null;
-  const parsed = parseEffortLabel(option.label);
-  if (parsed) {
-    if (!(effortIndex instanceof Map) || effortIndex.has(parsed.base)) {
-      return parsed;
+function resolveGroupDisplayName(groupKey, byEffort, option, groupedModels) {
+  const gm = groupedModels && typeof groupedModels === 'object' ? groupedModels[groupKey] : null;
+  if (gm && typeof gm.displayName === 'string' && gm.displayName.trim()) {
+    return gm.displayName.trim();
+  }
+  const parsed = parseEffortLabel(option?.label);
+  if (parsed?.base) return parsed.base;
+  if (byEffort instanceof Map) {
+    for (const candidate of byEffort.values()) {
+      const candidateBase = parseEffortLabel(candidate?.label)?.base;
+      if (candidateBase) return candidateBase;
     }
   }
+  return groupKey;
+}
+
+export function resolveBaseAndEffort(option, effortIndex, groupedModels = null) {
+  if (!option || option.isCustom) return null;
+  const parsed = parseEffortLabel(option.label);
+
   if (effortIndex instanceof Map) {
-    for (const [base, byEffort] of effortIndex.entries()) {
+    // Antigravity 新版 groupedModels 结构中 effortIndex 键名可能为 groupKey（如 gemini-4-neon）
+    for (const [groupKey, byEffort] of effortIndex.entries()) {
       if (!(byEffort instanceof Map)) continue;
       for (const [effort, candidate] of byEffort.entries()) {
         if (
           candidate === option ||
           (candidate &&
-            candidate.label === option.label &&
-            (candidate.value == null || option.value == null || candidate.value === option.value))
+            ((option.modelId && candidate.modelId === option.modelId) ||
+              (candidate.label === option.label &&
+                (candidate.value == null || option.value == null || candidate.value === option.value))))
         ) {
-          return { base, effort };
+          return {
+            base: resolveGroupDisplayName(groupKey, byEffort, option, groupedModels),
+            groupKey,
+            effort,
+          };
         }
       }
     }
+    if (parsed && effortIndex.has(parsed.base)) {
+      return { base: parsed.base, groupKey: parsed.base, effort: parsed.effort };
+    }
   }
-  return parsed;
+  return parsed ? { base: parsed.base, groupKey: parsed.base, effort: parsed.effort } : null;
 }
 
-export function getAvailableEfforts(baseName, effortIndex) {
-  if (!baseName || !(effortIndex instanceof Map)) return [];
-  const byEffort = effortIndex.get(baseName);
-  if (!(byEffort instanceof Map) || byEffort.size === 0) return [];
+function findEffortGroupEntry(baseOrGroupKey, effortIndex, groupedModels = null) {
+  if (!baseOrGroupKey || !(effortIndex instanceof Map)) return null;
+  if (effortIndex.has(baseOrGroupKey)) {
+    const direct = effortIndex.get(baseOrGroupKey);
+    return direct instanceof Map ? direct : null;
+  }
+  if (groupedModels && typeof groupedModels === 'object') {
+    for (const [groupKey, meta] of Object.entries(groupedModels)) {
+      if (meta?.displayName === baseOrGroupKey && effortIndex.has(groupKey)) {
+        const hit = effortIndex.get(groupKey);
+        if (hit instanceof Map) return hit;
+      }
+    }
+  }
+  for (const byEffort of effortIndex.values()) {
+    if (!(byEffort instanceof Map)) continue;
+    for (const candidate of byEffort.values()) {
+      if (parseEffortLabel(candidate?.label)?.base === baseOrGroupKey) {
+        return byEffort;
+      }
+    }
+  }
+  return null;
+}
+
+export function getAvailableEfforts(baseOrGroupKey, effortIndex, groupedModels = null) {
+  const byEffort = findEffortGroupEntry(baseOrGroupKey, effortIndex, groupedModels);
+  if (!byEffort || byEffort.size === 0) return [];
 
   const result = [];
   const seen = new Set();
@@ -119,22 +144,69 @@ export function formatEffortLabel(effort, lang = 'en') {
   return table[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '');
 }
 
-export function resolveBrandId(meta = {}) {
+function testSafeRegex(regex, text) {
+  if (regex.global || regex.sticky) regex.lastIndex = 0;
+  return regex.test(text);
+}
+
+function matchesRulePattern(pattern, fields, haystack) {
+  if (!pattern) return false;
+  if (pattern instanceof RegExp) {
+    return fields.some((f) => testSafeRegex(pattern, f)) || (haystack ? testSafeRegex(pattern, haystack) : false);
+  }
+  if (typeof pattern === 'string') {
+    const p = pattern.trim().toLowerCase();
+    if (!p) return false;
+    if (fields.some((f) => f.toLowerCase() === p)) return true;
+    return haystack.includes(p);
+  }
+  return false;
+}
+
+export function resolveBrandId(meta = {}, registry = null) {
+  const disabledPatterns = registry?.disabledPatterns ?? DISABLED_MODEL_PATTERNS;
+  const overrides = registry?.overrides ?? MODEL_ICON_OVERRIDES;
+  const providerMap = registry?.providerMap ?? PROVIDER_ICON_MAP;
+  const brandRules = registry?.brandRules ?? BRAND_ICON_RULES;
+
+  const parsedLabelBase = parseEffortLabel(meta.label)?.base || '';
+  const fields = [
+    meta.base,
+    parsedLabelBase,
+    meta.label,
+    meta.displayName,
+    meta.modelId,
+    meta.modelAlias,
+    meta.modelOrAlias?.model,
+    meta.modelOrAlias?.alias,
+  ]
+    .filter((v) => typeof v === 'string' && v.trim())
+    .map((v) => v.trim());
+
+  const haystack = fields.join(' ').toLowerCase();
+
+  for (const pattern of disabledPatterns) {
+    if (matchesRulePattern(pattern, fields, haystack)) {
+      return null;
+    }
+  }
+
+  for (const entry of overrides) {
+    if (entry && entry.icon && matchesRulePattern(entry.match, fields, haystack)) {
+      return entry.icon;
+    }
+  }
+
   const providerRaw = typeof meta.provider === 'string' ? meta.provider.toLowerCase() : '';
   if (providerRaw && !providerRaw.includes('unspecified') && !providerRaw.includes('antigravity')) {
-    for (const [token, brandId] of PROVIDER_ENUM_MAP) {
+    for (const [token, brandId] of providerMap) {
       if (providerRaw.includes(token)) return brandId;
     }
   }
 
-  const haystack = [meta.base, meta.label, meta.modelId, meta.modelAlias]
-    .filter((v) => typeof v === 'string' && v.trim())
-    .join(' ')
-    .toLowerCase();
-
   if (!haystack) return 'fallback';
 
-  for (const rule of BRAND_RULES) {
+  for (const rule of brandRules) {
     if (rule.test(haystack)) {
       return rule.id;
     }
@@ -165,6 +237,7 @@ export function prepareSvgMarkup(rawSvg, prefix = 'ag-me-svg') {
 }
 
 export function createBrandSvgElement(doc, iconsMap, brandId) {
+  if (!brandId) return null;
   const raw = (iconsMap && (iconsMap[brandId] || iconsMap.fallback)) || '';
   const markup = prepareSvgMarkup(raw);
   if (!markup || !doc?.createElement) return null;

@@ -353,14 +353,47 @@ test('model-core: 思考档位解析、排序、默认档位与品牌匹配', ()
 
   assert.deepEqual(resolveBaseAndEffort(highOpt, effortIndex), {
     base: 'Gemini 4 Hydrogen',
+    groupKey: 'Gemini 4 Hydrogen',
     effort: 'high',
   });
+
+  // groupedModels 结构下 effortIndex 以 groupKey 为键名，也能解析出 displayName 与档位列表
+  const neonLow = { label: 'Gemini 4 Neon (Low)', modelId: 'gemini-4-neon-low', value: 11 };
+  const neonXHigh = { label: 'Gemini 4 Neon (XHigh)', modelId: 'gemini-4-neon-xhigh', value: 12 };
+  const groupedEffortIndex = new Map([
+    [
+      'gemini-4-neon',
+      new Map([
+        ['low', neonLow],
+        ['xhigh', neonXHigh],
+      ]),
+    ],
+  ]);
+  const groupedModels = {
+    'gemini-4-neon': { displayName: 'Gemini 4 Neon' },
+  };
+  assert.deepEqual(resolveBaseAndEffort(neonXHigh, groupedEffortIndex, groupedModels), {
+    base: 'Gemini 4 Neon',
+    groupKey: 'gemini-4-neon',
+    effort: 'xhigh',
+  });
+  assert.deepEqual(
+    getAvailableEfforts('Gemini 4 Neon', groupedEffortIndex, groupedModels).map((x) => x.effort),
+    ['low', 'xhigh'],
+  );
 
   assert.equal(formatEffortLabel('high', 'zh-CN'), '高');
   assert.equal(formatEffortLabel('xhigh', 'en'), 'Extra');
 
-  // 品牌图标匹配（含词边界检查，防止 pro / model 误匹配 o3/o1）
+  // 品牌图标匹配（含词边界检查、Gemini 4 新模型代号、Orchestrator 以及覆盖/屏蔽规则）
   assert.equal(resolveBrandId({ base: 'Gemini 4 Hydrogen' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Gemini 4 Neon (High)', modelId: 'gemini-4-neon-high' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Gemini 4 Carbon (Max)', modelId: 'gemini-4-carbon-max' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Carbon' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Neon' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Nano Banana 2' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Orchestrator', modelId: 'gemini-pro-orchestrator' }), 'gemini');
+  assert.equal(resolveBrandId({ label: 'Orchestrator' }), 'gemini');
   assert.equal(resolveBrandId({ label: 'Claude Opus 4.5 (Thinking)' }), 'anthropic');
   assert.equal(resolveBrandId({ label: 'GPT-6.1 Sol' }), 'openai');
   assert.equal(resolveBrandId({ label: 'o3-mini' }), 'openai');
@@ -377,6 +410,21 @@ test('model-core: 思考档位解析、排序、默认档位与品牌匹配', ()
   assert.equal(
     resolveBrandId({ label: 'Custom Endpoint', provider: 'MODEL_PROVIDER_ANTHROPIC' }),
     'anthropic',
+  );
+  // 覆盖表优先于品牌匹配；禁用清单优先返回 null（不渲染图标）
+  assert.equal(
+    resolveBrandId(
+      { label: 'Gemini 4 Neon (High)', modelId: 'gemini-4-neon-high' },
+      { overrides: [{ match: 'Gemini 4 Neon', icon: 'openai' }] },
+    ),
+    'openai',
+  );
+  assert.equal(
+    resolveBrandId(
+      { label: 'Gemini 4 Argon (Low)', modelId: 'gemini-4-argon-low' },
+      { disabledPatterns: ['Gemini 4 Argon'] },
+    ),
+    null,
   );
 });
 
@@ -743,6 +791,113 @@ test('slider-ui: 阶段切换支持平滑动画并在 reduced-motion 或卸载�
   assert.ok(animCalls.length > 0);
   controller.destroy();
   assert.ok(cancelledCount > 0);
+});
+
+test('slider-ui: groupedModels 键名兼容与 Orchestrator 行及子菜单图标注入', () => {
+  const { win, doc, makeEvent } = createMockDom();
+  const iconsMap = {
+    gemini: '<svg viewBox="0 0 24 24"><path d="M1 1"/></svg>',
+    anthropic: '<svg viewBox="0 0 24 24"><path d="M2 2"/></svg>',
+    fallback: '<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>',
+  };
+
+  const neonLow = { label: 'Gemini 4 Neon (Low)', modelId: 'gemini-4-neon-low', value: 1 };
+  const neonXHigh = { label: 'Gemini 4 Neon (XHigh)', modelId: 'gemini-4-neon-xhigh', value: 2 };
+  const effortIndex = new Map([
+    [
+      'gemini-4-neon',
+      new Map([
+        ['low', neonLow],
+        ['xhigh', neonXHigh],
+      ]),
+    ],
+  ]);
+
+  const selections = [];
+  const providerCtx = {
+    selectedModel: neonLow,
+    effortIndex,
+    userStatus: {
+      cascadeModelConfigData: {
+        groupedModels: {
+          'gemini-4-neon': { displayName: 'Gemini 4 Neon' },
+        },
+      },
+    },
+    groups: [{ groupName: 'Recommended', options: [neonLow] }],
+    bestOfNConfig: { isBestOfNEnabled: false },
+    isModelListLoading: false,
+    setSelectedModel() {},
+  };
+
+  const panelEl = doc.createElement('div');
+  panelEl.setAttribute('data-testid', 'model-selector-panel');
+
+  const orchRow = doc.createElement('div');
+  orchRow.setAttribute('role', 'menuitem');
+  orchRow.setAttribute('data-testid', 'model-selector-orchestrator');
+  orchRow.setAttribute('data-model-label', 'Orchestrator');
+  const orchSpan = doc.createElement('span');
+  orchSpan.textContent = 'Orchestrator';
+  orchRow.append(orchSpan);
+
+  const neonRow = doc.createElement('div');
+  neonRow.setAttribute('role', 'menuitem');
+  const neonInner = doc.createElement('span');
+  const neonGroup = doc.createElement('span');
+  neonGroup.setAttribute('data-testid', 'model-selector-effort-group');
+  neonGroup.setAttribute('data-model-base', 'Gemini 4 Neon');
+  neonGroup.textContent = 'Gemini 4 Neon';
+  neonInner.append(neonGroup);
+  neonRow.append(neonInner);
+
+  // Portal 挂载到 document 上的 Orchestrator 子菜单行
+  const pickerRow = doc.createElement('div');
+  pickerRow.setAttribute('role', 'menuitem');
+  pickerRow.setAttribute('data-testid', 'orchestrator-picker-row');
+  pickerRow.setAttribute('data-model-label', 'Claude Opus 5.5');
+  const pickerInner = doc.createElement('span');
+  pickerInner.textContent = 'Claude Opus 5.5';
+  pickerRow.append(pickerInner);
+
+  panelEl.append(orchRow, neonRow);
+  doc.body.append(panelEl, pickerRow);
+
+  const xqcFiber = {
+    memoizedProps: {
+      modelSorts: [],
+      setIsOpen: () => {},
+      setSelectedModel(opt) {
+        providerCtx.selectedModel = opt;
+        selections.push(opt);
+      },
+    },
+    return: null,
+  };
+  panelEl.__reactFiber$test = {
+    memoizedProps: {},
+    return: { memoizedProps: { value: providerCtx }, return: xqcFiber },
+  };
+
+  const controller = createModelEnhancerController(win, doc, iconsMap);
+  controller.scanPanels();
+
+  // Stage 1 应显示可读的 displayName "Gemini 4 Neon"，而不是 groupKey "gemini-4-neon"
+  assert.equal(panelEl.querySelector('[data-ag-me-model-switch-name]').textContent, 'Gemini 4 Neon');
+  assert.equal(panelEl.querySelectorAll('[data-ag-me-tick]').length, 2);
+
+  // 切到 Stage 2 列表后应为 Orchestrator、Gemini 4 Neon 与子菜单行注入对应品牌图标
+  panelEl.querySelector('[data-ag-me-model-switch]').dispatchEvent(makeEvent('click'));
+  assert.equal(orchSpan.querySelector('[data-ag-me-icon]').getAttribute('data-ag-me-icon'), 'gemini');
+  assert.equal(neonInner.querySelector('[data-ag-me-icon]').getAttribute('data-ag-me-icon'), 'gemini');
+  assert.equal(pickerInner.querySelector('[data-ag-me-icon]').getAttribute('data-ag-me-icon'), 'anthropic');
+
+  // 点击 Gemini 4 Neon 多档位行可正常切回 Stage 1
+  neonRow.dispatchEvent(makeEvent('click'));
+  assert.equal(panelEl.getAttribute('data-ag-me-stage'), 'slider');
+  assert.equal(selections.at(-1), neonLow);
+
+  controller.destroy();
 });
 
 test('build: 构建产物 index.js 可在隔离 VM 中幂等执行', () => {
