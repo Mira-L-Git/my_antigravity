@@ -29,7 +29,7 @@
 | **`file-link-color`** | Pure CSS plugin that highlights filenames (including extensions) of chat file links with file icons (including generic `document.svg`, excluding folders) in native link blue, adapting automatically to light/dark themes while preserving muted line-number suffixes (`#L...`) and file tree styling. |
 | **`taskbar-badge`** | **(Testing / Experimental)** Unread background session indicator: when unfocused or background conversations finish, request approval, or error, displays a deduplicated session count on the Windows taskbar via multi-DPI `setOverlayIcon` (**`error >> approval >> completed`**, colored red / yellow / dark charcoal, `99+` cap) and a matching green / yellow / red dot on the system tray icon. Clicking each conversation decrements the count back to zero. *(Limited by Windows' native `16×16 DIP` overlay slot clarity; requires re-running `install-loader` once for the main-process bridge.)* |
 | **`dino-game`** | Right auxiliary pane mini-game: adds a compact Dino button to the top-right toolbar of the right aux pane (no left sidebar entry) that opens a borderless Chrome Dino game blending into the native pane background; supports `Space` / `↑` jump, `↓` duck/fast-drop, `P` pause, `Esc` close, light/dark theme adaptation, and strict focus isolation from the main chat input. |
-| **`mod-manager`** | Maps the top-left Antigravity logo button to a **Plugin Manager** popover (`Alt + Click` preserves the original home action). Lists mods with persistent switches (`mods-state.json`) and one-click window reload when changes are pending. |
+| **`mod-manager`** | Maps the top-left Antigravity logo button to a **Plugin Manager** popover (`Alt + Click` preserves the original home action). Lists mods with persistent switches (`mods-state.json`) and one-click window reload when changes are pending. Includes the current suite version and an on-demand **Check Updates** button in the top-right header (no background polling): prompts when up to date, or shows the newer version and switches the button to `GitHub ↗` to open the repository in the default browser. |
 
 ---
 
@@ -58,7 +58,17 @@ npm run status            # Inspect loader status and active plugin states
 npm run uninstall-loader  # Restore original app.asar (or double-click uninstall.cmd on Windows)
 ```
 
-> **Note**: When Antigravity auto-updates and replaces `app.asar`, simply quit Antigravity and re-run `npm run install-loader` (or `install.cmd`). Your `mods-state.json` toggle preferences will be preserved.
+> **Note**:
+> - For regular edits under `plugins/`, run `npm run sync` and reload the window without reinstalling the loader; if changes touch `loader/` (e.g., new main-process IPC bridges), quit Antigravity completely and run `npm run install-loader` once.
+> - When Antigravity auto-updates and replaces `app.asar`, simply quit Antigravity and re-run `npm run install-loader` (or `install.cmd`). Your `mods-state.json` toggle preferences will be preserved.
+
+### Versioning Convention (Current `v1.0.0`)
+The suite uses a three-part version `X.Y.Z` defined in [`package.json`](package.json) (automatically written to `plugin.json` during `npm run sync`):
+1. **Major (`X`)**: Incremented for major releases (decided by the maintainer)
+2. **Minor (`Y`)**: Incremented when a new plugin is added
+3. **Patch (`Z`)**: Incremented for plugin maintenance and minor updates
+
+When checking for updates, `mod-manager` compares `X`, `Y`, and `Z` numerically in order against `package.json` on GitHub `main`.
 
 ---
 
