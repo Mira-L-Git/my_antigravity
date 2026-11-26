@@ -23,10 +23,6 @@ const SHORT_SUMMARY_BY_ID = {
     'zh-CN': 'Enter 换行，Shift+Enter 发送',
     en: 'Enter for newline, Shift+Enter to send',
   },
-  'file-link-color': {
-    'zh-CN': '聊天带图标文件名蓝色高亮',
-    en: 'Blue text for chat file links',
-  },
   'model-enhancer': {
     'zh-CN': '模型品牌图标与思考深度拉条',
     en: 'Model brand icons & effort slider',

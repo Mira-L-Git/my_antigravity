@@ -1,8 +1,0 @@
-/*
- * file-link-color：将聊天正文中带有文件图标的链接名称（含后缀）高亮为原生链接蓝。
- * - 匹配 /symbols-icons/icons/files/*.svg（含普通文档兜底图标 document.svg，排除文件夹图标）；
- * - 仅作用于聊天正文的 .context-scope-mention .inline-pill，保持行号（.text-muted-foreground）灰色与文件树原貌。
- */
-.context-scope-mention .inline-pill:has(img[src*="/symbols-icons/icons/files/"]) {
-  color: var(--color-link, var(--link, #60a5fa));
-}
