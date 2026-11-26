@@ -1,7 +1,7 @@
 {
   "id": "mod-manager",
   "name": "插件管理菜单 (Mod Manager)",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "enabled": true,
   "protected": true,
   "entry": "index.js",

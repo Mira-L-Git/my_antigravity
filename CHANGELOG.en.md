@@ -5,6 +5,12 @@
 
 ---
 
+## v1.0.1 (2026-11-26)
+
+- **Removed `file-link-color`**: Cancelled and removed the `file-link-color` plugin from the suite because Antigravity Desktop now officially provides the same native link-blue styling for chat file links.
+
+---
+
 ## v1.0.0 (2026-11-25)
 
 **Initial public release of My Antigravity** — a zero-dependency modular UI/UX enhancement suite for the Antigravity desktop app, letting you toggle individual mods in-app after a single loader install.
@@ -13,7 +19,6 @@
 
 - **Input & Reading Experience**
   - **`enter-newline`**: Swaps chat shortcuts to `Enter` for newline and `Shift+Enter` to send, preventing accidental premature sends when writing multi-line prompts (while keeping IME and `@`/`/` typeahead intact).
-  - **`file-link-color`**: Highlights filenames on chat file links in native link blue so referenced files stand out immediately from surrounding prose.
   - **`zh-cn`**: Localizes the desktop UI to Simplified Chinese while isolating chat messages, code blocks, and terminals so conversation content is never altered.
 
 - **Status Visibility & Model Control**
