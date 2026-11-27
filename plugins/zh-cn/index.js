@@ -429,12 +429,38 @@
   "Provide Feedback": "提交反馈",
   "Give Feedback": "提交反馈",
   "Projects": "项目",
+  "Not in Project": "未归属项目",
   "Create Project": "创建项目",
+  "New Project": "新建项目",
+  "Project Name": "项目名称",
   "Add Project": "添加项目",
   "Add Folder": "添加文件夹",
   "Workspaces": "工作区",
   "Conversations": "对话",
+  "No conversations yet": "暂无对话",
   "Inbox": "收件箱",
+  "New automation": "新建自动化任务",
+  "New Group": "新建分组",
+  "Move to Group": "移动到分组",
+  "Rename Conversation": "重命名对话",
+  "Open Folder": "打开文件夹",
+  "Open Folder (Interactive)": "打开文件夹（交互式）",
+  "Open Search": "打开搜索",
+  "Open project settings": "打开项目设置",
+  "Archive Workspace": "归档工作区",
+  "Archive project": "归档项目",
+  "Delete Permanently": "永久删除",
+  "Delete Task": "删除任务",
+  "Move Up": "上移",
+  "Move Down": "下移",
+  "Unread": "未读",
+  "Pinned": "已置顶",
+  "Recent": "最近",
+  "Filters": "筛选器",
+  "Search filters…": "搜索筛选条件…",
+  "Search triggers…": "搜索触发器…",
+  "Search Hosts…": "搜索主机…",
+  "Search Repositories…": "搜索仓库…",
   "Toggle Sidebar": "切换侧边栏",
   "Collapse All Folders": "折叠所有文件夹",
   "Expand All Folders": "展开所有文件夹",
@@ -803,15 +829,60 @@
   "Billing model": "计费模式",
   "Pay As You Go": "按量付费",
   "Credit Overages": "额度超额使用",
-  "Enable AI Credit Overages": "允许 AI 额度超额使用",
+  "Enable AI Credit Overages": "启用 AI 额度超额使用",
+  "Enable Overages": "启用超额使用",
   "Refresh quota and credits data": "刷新配额与额度数据",
   "Daily limit": "每日限额",
   "Weekly limit": "每周限额",
+  "Weekly Limit Remaining": "每周限额剩余",
+  "Five Hour Limit Remaining": "5 小时限额剩余",
+  "Daily Limit Remaining": "每日限额剩余",
   "Refreshing...": "刷新中...",
   "Pricing is based on public API pricing": "定价基于公开 API 价格计算",
   "Click to view more": "点击查看更多",
   "Trajectory Stats": "轨迹统计",
   "Jetski Chat": "Jetski 聊天",
+  "Upgrade": "升级",
+  "See Activity": "查看明细",
+  "See Plans": "查看套餐",
+  "Purchase Credits": "购买额度",
+  "Insufficient AI Credits": "AI 额度不足",
+  "Your plan": "当前套餐",
+  "Orchestrator Settings": "Orchestrator 设置",
+  "Choose the models Orchestrator uses. A larger, smarter orchestrator model with a faster, cheaper executor gives high quality for fewer tokens.": "选择 Orchestrator 使用的模型组合。用更强的 Orchestrator 模型搭配更快、更经济的 Executor 模型，能以更少 Token 获得高质量结果。",
+  "Model selection": "模型选择",
+  "Orchestrator model selection": "Orchestrator 模型选择",
+  "Default uses server-managed routing and Orchestrator quota. Custom pins specific models for orchestration and execution.": "默认模式使用服务端智能路由与 Orchestrator 配额；自定义模式可分别为编排与执行固定指定模型。",
+  "Orchestrator Model": "Orchestrator 模型",
+  "Plans the work, makes design decisions, and reviews the result. Pick a top-tier model. You can also pick one per conversation from the Orchestrator row in the model menu.": "负责规划任务、制定设计决策并审查结果，建议选择顶尖模型。你也可以在模型菜单的 Orchestrator 行中为单个对话单独指定。",
+  "Executor Model": "Executor 执行模型",
+  "Carries out the plan: searches, edits, builds, and tests. Pick a faster, cheaper model.": "负责执行计划：检索、编辑、构建与测试，建议选择更快、更经济的模型。",
+  "Gemini Models": "Gemini 模型",
+  "Error Loading Models": "加载模型出错",
+  "No Models Available": "暂无可用模型",
+  "Select Model": "选择模型",
+  "Select Model to Send Message": "选择用于发送消息的模型",
+  "Select another model": "选择其他模型",
+  "Change model": "切换模型",
+  "Choose which key sends a message in the chat composer.": "选择在聊天输入框中发送消息的按键。",
+  "For Antigravity Business consumption options, see": "如需了解 Antigravity Business 用量选项，请参阅",
+  "documentation": "文档",
+  "Enable browser agent": "启用浏览器 Agent",
+  "Browser actions": "浏览器操作",
+  "Browser downloads": "浏览器下载",
+  "Browsing data": "浏览数据",
+  "Unsandboxed commands": "Sandbox 外命令",
+  "Access grants": "访问授权",
+  "Plugin permissions": "插件权限",
+  "Changes plugins can make without asking.": "插件无需确认即可执行的操作。",
+  "Open Preferences": "打开偏好设置",
+  "Notification Preferences": "通知偏好设置",
+  "Link Settings": "链接设置",
+  "Project Settings": "项目设置",
+  "Advanced Settings": "高级设置",
+  "Telemetry is disabled in Settings": "遥测已在设置中禁用",
+  "Developer: Reset NUX": "开发者：重置新手引导 (NUX)",
+  "Developer: Reset Onboarding": "开发者：重置初始化引导",
   "Console Telemetry": "控制台遥测",
   "Enable Telemetry": "启用遥测日志",
   "Print telemetry to the console": "在控制台输出遥测事件",
@@ -946,6 +1017,13 @@
   "All active Antigravity shortcuts and user keybinding overrides are managed directly by VS Code.": "所有生效中的 Antigravity 快捷键与用户自定义键位覆盖均由 VS Code 直接管理。",
   "VS Code Keyboard Shortcuts": "VS Code 键盘快捷键"
 };
+  const LOWER_DICT = Object.create(null);
+  for (const key of Object.keys(EXACT_DICT)) {
+    const lower = key.toLowerCase();
+    if (!(lower in LOWER_DICT)) {
+      LOWER_DICT[lower] = EXACT_DICT[key];
+    }
+  }
   const PATTERNS = [
   {
     "pattern": "^Version\\s+(.+)$",
@@ -960,6 +1038,10 @@
     "replace": "开启后，$1 会收集使用数据以帮助 Google 改进性能与功能。"
   },
   {
+    "pattern": "^When toggled on,\\s+(.+?)\\s+will use your AI credits to fulfill model requests once you're out of model quota\\.\\s+\\1\\s+will always use your model quota first before using AI credits\\.$",
+    "replace": "开启后，当你的模型配额用完时，$1 将使用你的 AI 额度来响应模型请求。$1 始终会优先使用模型配额，然后再消耗 AI 额度。"
+  },
+  {
     "pattern": "^Receive product updates, tips, and promotions from Google\\s+(.+?)\\s+via email\\.$",
     "replace": "通过电子邮件接收来自 Google $1 的产品更新、使用技巧和优惠信息。"
   },
@@ -968,8 +1050,50 @@
     "replace": "设置 $1 语音播报的音量大小。"
   },
   {
-    "pattern": "^Your Plan:\\s*(.+)$",
+    "pattern": "^Your [Pp]lan:\\s*(.+)$",
     "replace": "当前套餐：$1"
+  },
+  {
+    "pattern": "^You can upgrade to a\\s+(.+?)\\s+plan to receive higher rate limits\\.$",
+    "replace": "你可以升级到 $1 套餐以获得更高的速率限制。"
+  },
+  {
+    "pattern": "^Available AI credits:\\s*(.+)$",
+    "replace": "可用 AI 额度：$1"
+  },
+  {
+    "pattern": "^You have used some of your weekly limit, it will fully refresh in\\s+(.+?)\\.$",
+    "replace": "你已使用部分每周限额，将在 $1后完全刷新。",
+    "localizeDuration": true
+  },
+  {
+    "pattern": "^You have used some of your daily limit, it will fully refresh in\\s+(.+?)\\.$",
+    "replace": "你已使用部分每日限额，将在 $1后完全刷新。",
+    "localizeDuration": true
+  },
+  {
+    "pattern": "^You have used some of your (\\d+)-hour limit, it will fully refresh in\\s+(.+?)\\.$",
+    "replace": "你已使用部分 $1 小时限额，将在 $2后完全刷新。",
+    "localizeDuration": true
+  },
+  {
+    "pattern": "^You have reached your (\\d+)-hour limit(?:, it will (?:fully )?refresh in\\s+(.+?))?\\.?$",
+    "replace": "你已达到 $1 小时限额，将在 $2后完全刷新。",
+    "localizeDuration": true
+  },
+  {
+    "pattern": "^You have reached your (weekly|daily) limit(?:, it will (?:fully )?refresh in\\s+(.+?))?\\.?$",
+    "replace": "你已达到 $1 限额，将在 $2后完全刷新。",
+    "localizeDuration": true
+  },
+  {
+    "pattern": "^Resets in <1m$",
+    "replace": "将在 1 分钟内重置"
+  },
+  {
+    "pattern": "^Resets in\\s+(.+)$",
+    "replace": "将在 $1后重置",
+    "localizeDuration": true
   },
   {
     "pattern": "^Project ID:\\s*(.+)$",
@@ -1058,6 +1182,7 @@
 ].map((item) => ({
     regex: new RegExp(item.pattern),
     replace: item.replace,
+    localizeDuration: Boolean(item.localizeDuration),
   }));
 
   // 绝不翻译文本节点的隔离区域：代码块、用户输入、AI 回复正文、终端、地址栏等
@@ -1111,27 +1236,55 @@
   const writtenTextMap = new WeakMap();
   const writtenAttrMap = new WeakMap();
 
+  function localizeDurationText(text) {
+    return text
+      .replace(/(\d+)\s*days?\b/gi, '$1 天')
+      .replace(/(\d+)\s*hours?\b/gi, '$1 小时')
+      .replace(/(\d+)\s*minutes?\b/gi, '$1 分钟')
+      .replace(/(\d+)\s*seconds?\b/gi, '$1 秒')
+      .replace(/(\d+)d\b/g, '$1 天')
+      .replace(/(\d+)h\b/g, '$1 小时')
+      .replace(/(\d+)m\b/g, '$1 分钟')
+      .replace(/\s*,\s*/g, ' ');
+  }
+
+  function lookupDict(text) {
+    if (Object.prototype.hasOwnProperty.call(EXACT_DICT, text)) {
+      return EXACT_DICT[text];
+    }
+    if (text.includes(' ') || text.length >= 4) {
+      const lower = text.toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(LOWER_DICT, lower)) {
+        return LOWER_DICT[lower];
+      }
+    }
+    return null;
+  }
+
   function translateCore(trimmed) {
     if (!trimmed) {
       return null;
     }
-    if (Object.prototype.hasOwnProperty.call(EXACT_DICT, trimmed)) {
-      return EXACT_DICT[trimmed];
+    const direct = lookupDict(trimmed);
+    if (direct !== null) {
+      return direct;
     }
     // 回退匹配：去掉末尾冒号或省略号后再查词典，并保留原末尾标点
     const suffixMatch = /^(.*?)(\s*[:：]|\.\.\.|…)$/.exec(trimmed);
     if (suffixMatch) {
       const base = suffixMatch[1].trim();
       const rawSuffix = suffixMatch[2];
-      if (Object.prototype.hasOwnProperty.call(EXACT_DICT, base)) {
+      const baseHit = lookupDict(base);
+      if (baseHit !== null) {
         const zhSuffix = rawSuffix.includes(':') ? '：' : rawSuffix;
-        return EXACT_DICT[base] + zhSuffix;
+        return baseHit + zhSuffix;
       }
     }
     for (let i = 0; i < PATTERNS.length; i++) {
-      const { regex, replace } = PATTERNS[i];
+      const { regex, replace, localizeDuration } = PATTERNS[i];
       if (regex.test(trimmed)) {
-        return trimmed.replace(regex, replace);
+        const out = trimmed.replace(regex, replace);
+        return localizeDuration ? localizeDurationText(out) : out;
       }
     }
     return null;

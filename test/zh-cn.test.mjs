@@ -169,6 +169,29 @@ test('动态正则模板能翻译版本号、思考耗时、文件变更数与�
     '启用后，Agent 将加载内置默认的 Customizations（包括默认 Skills）。',
   );
   assert.equal(tr('Your Plan: Ultra'), '当前套餐：Ultra');
+  assert.equal(tr('Your plan: '), '当前套餐： ');
+  assert.equal(
+    tr('You can upgrade to a Google AI Ultra plan to receive higher rate limits.'),
+    '你可以升级到 Google AI Ultra 套餐以获得更高的速率限制。',
+  );
+  assert.equal(
+    tr(
+      "When toggled on, Antigravity will use your AI credits to fulfill model requests once you're out of model quota. Antigravity will always use your model quota first before using AI credits.",
+    ),
+    '开启后，当你的模型配额用完时，Antigravity 将使用你的 AI 额度来响应模型请求。Antigravity 始终会优先使用模型配额，然后再消耗 AI 额度。',
+  );
+  assert.equal(
+    tr('You have used some of your weekly limit, it will fully refresh in 5 days, 19 hours.'),
+    '你已使用部分每周限额，将在 5 天 19 小时后完全刷新。',
+  );
+  assert.equal(
+    tr('You have used some of your 5-hour limit, it will fully refresh in 4 hours, 58 minutes.'),
+    '你已使用部分 5 小时限额，将在 4 小时 58 分钟后完全刷新。',
+  );
+  assert.equal(tr('Resets in 5d 19h'), '将在 5 天 19 小时后重置');
+  assert.equal(tr('enable ai credit overages'), '启用 AI 额度超额使用');
+  assert.equal(tr('Orchestrator Settings'), 'Orchestrator 设置');
+  assert.equal(tr('Not in Project'), '未归属项目');
 });
 
 test('绝不翻译代码块、终端、编辑器、用户消息与 Agent 回复正文', () => {

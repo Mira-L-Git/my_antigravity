@@ -10,9 +10,17 @@
 
   // 以下占位常量在 build.mjs 打包时会被替换为真实词典与模板
   const EXACT_DICT = __ZH_CN_EXACT_DICT__;
+  const LOWER_DICT = Object.create(null);
+  for (const key of Object.keys(EXACT_DICT)) {
+    const lower = key.toLowerCase();
+    if (!(lower in LOWER_DICT)) {
+      LOWER_DICT[lower] = EXACT_DICT[key];
+    }
+  }
   const PATTERNS = __ZH_CN_PATTERNS__.map((item) => ({
     regex: new RegExp(item.pattern),
     replace: item.replace,
+    localizeDuration: Boolean(item.localizeDuration),
   }));
 
   // 绝不翻译文本节点的隔离区域：代码块、用户输入、AI 回复正文、终端、地址栏等
@@ -66,27 +74,55 @@
   const writtenTextMap = new WeakMap();
   const writtenAttrMap = new WeakMap();
 
+  function localizeDurationText(text) {
+    return text
+      .replace(/(\d+)\s*days?\b/gi, '$1 天')
+      .replace(/(\d+)\s*hours?\b/gi, '$1 小时')
+      .replace(/(\d+)\s*minutes?\b/gi, '$1 分钟')
+      .replace(/(\d+)\s*seconds?\b/gi, '$1 秒')
+      .replace(/(\d+)d\b/g, '$1 天')
+      .replace(/(\d+)h\b/g, '$1 小时')
+      .replace(/(\d+)m\b/g, '$1 分钟')
+      .replace(/\s*,\s*/g, ' ');
+  }
+
+  function lookupDict(text) {
+    if (Object.prototype.hasOwnProperty.call(EXACT_DICT, text)) {
+      return EXACT_DICT[text];
+    }
+    if (text.includes(' ') || text.length >= 4) {
+      const lower = text.toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(LOWER_DICT, lower)) {
+        return LOWER_DICT[lower];
+      }
+    }
+    return null;
+  }
+
   function translateCore(trimmed) {
     if (!trimmed) {
       return null;
     }
-    if (Object.prototype.hasOwnProperty.call(EXACT_DICT, trimmed)) {
-      return EXACT_DICT[trimmed];
+    const direct = lookupDict(trimmed);
+    if (direct !== null) {
+      return direct;
     }
     // 回退匹配：去掉末尾冒号或省略号后再查词典，并保留原末尾标点
     const suffixMatch = /^(.*?)(\s*[:：]|\.\.\.|…)$/.exec(trimmed);
     if (suffixMatch) {
       const base = suffixMatch[1].trim();
       const rawSuffix = suffixMatch[2];
-      if (Object.prototype.hasOwnProperty.call(EXACT_DICT, base)) {
+      const baseHit = lookupDict(base);
+      if (baseHit !== null) {
         const zhSuffix = rawSuffix.includes(':') ? '：' : rawSuffix;
-        return EXACT_DICT[base] + zhSuffix;
+        return baseHit + zhSuffix;
       }
     }
     for (let i = 0; i < PATTERNS.length; i++) {
-      const { regex, replace } = PATTERNS[i];
+      const { regex, replace, localizeDuration } = PATTERNS[i];
       if (regex.test(trimmed)) {
-        return trimmed.replace(regex, replace);
+        const out = trimmed.replace(regex, replace);
+        return localizeDuration ? localizeDurationText(out) : out;
       }
     }
     return null;
