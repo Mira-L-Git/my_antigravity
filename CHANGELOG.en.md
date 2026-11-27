@@ -5,6 +5,12 @@
 
 ---
 
+## v1.0.2 (2026-11-27)
+
+- **Fixed `dino-game` UI display bugs**: Removed fallback toolbar mounting and enforced strict detection requiring both the right auxiliary pane's New Tab menu list and URL search bar, ensuring the Chrome Dino trigger appears strictly beside `⋮` on the New Tab view and no longer leaks into Review, Browser, workspace file tree, or model picker popovers.
+
+---
+
 ## v1.0.1 (2026-11-26)
 
 - **Removed `file-link-color`**: Cancelled and removed the `file-link-color` plugin from the suite because Antigravity Desktop now officially provides the same native link-blue styling for chat file links.

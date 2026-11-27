@@ -365,17 +365,17 @@ test('main-hook: 支持读取 plugin.json 版本号、远端版本比对及白�
     const pluginTarget = path.join(tmpConfigDir, 'plugins', 'my_antigravity');
     syncPlugins({ targetDir: pluginTarget });
 
-    assert.equal(mainHook.getAppVersion(tmpConfigDir), '1.0.1');
-    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, '1.0.1');
+    assert.equal(mainHook.getAppVersion(tmpConfigDir), '1.0.2');
+    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, '1.0.2');
 
     const latestRes = await mainHook.checkForUpdates({
       configDir: tmpConfigDir,
-      fetchJson: async () => ({ version: '1.0.1' }),
+      fetchJson: async () => ({ version: '1.0.2' }),
     });
     assert.equal(latestRes.ok, true);
     assert.equal(latestRes.hasUpdate, false);
-    assert.equal(latestRes.currentVersion, '1.0.1');
-    assert.equal(latestRes.latestVersion, '1.0.1');
+    assert.equal(latestRes.currentVersion, '1.0.2');
+    assert.equal(latestRes.latestVersion, '1.0.2');
 
     const newerPatchRes = await mainHook.checkForUpdates({
       configDir: tmpConfigDir,
@@ -383,7 +383,7 @@ test('main-hook: 支持读取 plugin.json 版本号、远端版本比对及白�
     });
     assert.equal(newerPatchRes.ok, true);
     assert.equal(newerPatchRes.hasUpdate, true);
-    assert.equal(newerPatchRes.latestVersion, '1.0.2');
+    assert.equal(newerPatchRes.latestVersion, '1.0.3');
 
     const badUrlRes = await mainHook.openExternalUrl('https://evil.example.com');
     assert.equal(badUrlRes.ok, false);
