@@ -523,12 +523,25 @@ test('ui: 左下角按「左圆角方形(其它) + 右圆形(Gemini)」挂载、
   assert.equal(buttons[1].getAttribute('data-ag-qr-group'), 'gemini');
   assert.equal(buttons[1].getAttribute('data-ag-qr-shape'), 'circle');
 
-  // 检验 1:3 双窗节点存在与数字
+  // 检验 1:3 双窗节点存在、真实弧长切片（不含 pathLength）与数字
   assert.equal(buttons[0].querySelector('[data-window="fiveHour"]') != null, true);
   const squareWeekly = buttons[0].querySelector('[data-window="weekly"]');
   assert.equal(squareWeekly != null, true);
   assert.equal(squareWeekly.querySelector('.ag-qr-track').getAttribute('d'), 'M 26.29 29.18 A 7 7 0 0 1 23 30 H 9 A 7 7 0 0 1 5.71 29.18');
+  assert.equal(squareWeekly.querySelector('.ag-qr-fill').hasAttribute('pathLength'), false);
   assert.equal(buttons[0].querySelector('.ag-qr-number').textContent, '72');
+
+  // 检验周额度 50% 时严格截断到几何底边正中 (16.00, 30.00)
+  const [sq50] = buildRingContent(doc, 'square', {
+    mode: 'dual',
+    primary: 50,
+    fiveHour: 50,
+    weekly: 50,
+  });
+  const top50D = sq50.querySelector('[data-window="fiveHour"]').querySelector('.ag-qr-fill').getAttribute('d');
+  const bot50D = sq50.querySelector('[data-window="weekly"]').querySelector('.ag-qr-fill').getAttribute('d');
+  assert.equal(top50D.endsWith('16.00 2.00'), true);
+  assert.equal(bot50D.endsWith('16.00 30.00'), true);
   assert.equal(buttons[1].querySelector('[data-window="fiveHour"]') != null, true);
   assert.equal(buttons[1].querySelector('[data-window="weekly"]') != null, true);
   assert.equal(buttons[1].querySelector('.ag-qr-number').textContent, '90');

@@ -12,4 +12,4 @@
    - 当 Antigravity 仅返回模型 `quotaInfo`（单一 `remainingFraction` 与 `resetTime`）时，自动降级为完整单环，不伪造周额度。
 2. **组内瓶颈聚合**：默认取组内最小剩余比例；悬停显示两列对齐摘要与本地化重置时间（`MM/DD HH:mm`），存在多个不同比例模型池时附带精简子池明细。
 3. **点击直达模型配额**：点击任意环自动打开「设置 → 模型（Models）」标签页并滚动定位配额区。
-4. **原生视觉融合**：全程沿用 Antigravity 中性灰主题变量与 `.surface-glass` 浮层材质，并标记 `data-my-antigravity-no-i18n="true"` 隔离翻译。
+4. **原生视觉融合**：全程沿用 Antigravity 中性灰主题变量与 `.surface-glass` 浮层材质，进度条采用真实弧长分段几何切片绘制（避免 `non-scaling-stroke` 与 `pathLength` 叠加导致的比例失真），并标记 `data-my-antigravity-no-i18n="true"` 隔离翻译。

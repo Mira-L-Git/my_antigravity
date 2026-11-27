@@ -862,15 +862,98 @@ function describeCircleArc(startDeg, endDeg, clockwise) {
 // 圆角方形路径（viewBox 32×32，中心盒 [2..30]×[2..30]，圆角半径 7）
 const SQUARE_FULL_TRACK_D =
   'M 16 2 H 23 A 7 7 0 0 1 30 9 V 23 A 7 7 0 0 1 23 30 H 9 A 7 7 0 0 1 2 23 V 9 A 7 7 0 0 1 9 2 Z';
-const SQUARE_FULL_PROGRESS_D =
-  'M 16 2 H 23 A 7 7 0 0 1 30 9 V 23 A 7 7 0 0 1 23 30 H 9 A 7 7 0 0 1 2 23 V 9 A 7 7 0 0 1 9 2 H 16';
 // 1:3 分割（切割点上移至底角 52° 处，左右各退让 24°）：
-// 上方 3/4 弧从右下角侧逆时针绕至左下角侧（配合 stroke-dasharray 从左下切口开始扣减）
+// 上方 3/4 弧从右下角侧逆时针绕至左下角侧（配合真实弧长切片从左下切口开始扣减，避免 non-scaling-stroke + pathLength 缩放偏差）
 const SQUARE_TOP_THREE_QUARTER_D =
   'M 29.79 24.69 A 7 7 0 0 0 30 23 V 9 A 7 7 0 0 0 23 2 H 9 A 7 7 0 0 0 2 9 V 23 A 7 7 0 0 0 2.21 24.69';
 // 下方 1/4 弧顺着左右底角自然弯曲（约 20.8 单位长，与上方 67.4 单位形成 1:3 比例），从右向左绘制
 const SQUARE_BOTTOM_LINE_D =
   'M 26.29 29.18 A 7 7 0 0 1 23 30 H 9 A 7 7 0 0 1 5.71 29.18';
+
+function segLine(x1, y1, x2, y2) {
+  return { type: 'line', x1, y1, x2, y2, len: Math.hypot(x2 - x1, y2 - y1) };
+}
+
+function segArc(cx, cy, r, a1Deg, a2Deg, sweep) {
+  return {
+    type: 'arc',
+    cx,
+    cy,
+    r,
+    a1Deg,
+    a2Deg,
+    sweep,
+    len: (r * Math.abs(a2Deg - a1Deg) * Math.PI) / 180,
+  };
+}
+
+function pointOnArc(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+/**
+ * 按真实弧长百分比截取分段路径（直线 + 圆弧），彻底规避 Chromium 下
+ * `vector-effect="non-scaling-stroke"` 与 `pathLength` 叠加造成的虚线长度缩放偏差。
+ */
+function sliceSegmentedPath(segments, percent) {
+  if (!Array.isArray(segments) || segments.length === 0 || !(percent > 0)) return '';
+  const frac = Math.max(0, Math.min(1, percent / 100));
+  const totalLen = segments.reduce((sum, s) => sum + s.len, 0);
+  if (!(totalLen > 0)) return '';
+
+  let remaining = totalLen * frac;
+  const first = segments[0];
+  const [startX, startY] =
+    first.type === 'line' ? [first.x1, first.y1] : pointOnArc(first.cx, first.cy, first.r, first.a1Deg);
+  const parts = [`M ${startX.toFixed(2)} ${startY.toFixed(2)}`];
+
+  for (const seg of segments) {
+    if (remaining <= 1e-6) break;
+    const take = Math.min(remaining, seg.len);
+    const t = take / seg.len;
+    if (seg.type === 'line') {
+      const ex = seg.x1 + (seg.x2 - seg.x1) * t;
+      const ey = seg.y1 + (seg.y2 - seg.y1) * t;
+      parts.push(`L ${ex.toFixed(2)} ${ey.toFixed(2)}`);
+    } else {
+      const endDeg = seg.a1Deg + (seg.a2Deg - seg.a1Deg) * t;
+      const [ex, ey] = pointOnArc(seg.cx, seg.cy, seg.r, endDeg);
+      const largeArc = Math.abs(endDeg - seg.a1Deg) > 180 ? 1 : 0;
+      parts.push(`A ${seg.r} ${seg.r} 0 ${largeArc} ${seg.sweep} ${ex.toFixed(2)} ${ey.toFixed(2)}`);
+    }
+    remaining -= take;
+  }
+  return parts.join(' ');
+}
+
+const SQUARE_TOP_SEGMENTS = [
+  segArc(23, 23, 7, 14, 0, 0),
+  segLine(30, 23, 30, 9),
+  segArc(23, 9, 7, 0, -90, 0),
+  segLine(23, 2, 9, 2),
+  segArc(9, 9, 7, -90, -180, 0),
+  segLine(2, 9, 2, 23),
+  segArc(9, 23, 7, 180, 166, 0),
+];
+
+const SQUARE_BOTTOM_SEGMENTS = [
+  segArc(23, 23, 7, 62, 90, 1),
+  segLine(23, 30, 9, 30),
+  segArc(9, 23, 7, 90, 118, 1),
+];
+
+const SQUARE_FULL_SEGMENTS = [
+  segLine(16, 2, 23, 2),
+  segArc(23, 9, 7, -90, 0, 1),
+  segLine(30, 9, 30, 23),
+  segArc(23, 23, 7, 0, 90, 1),
+  segLine(23, 30, 9, 30),
+  segArc(9, 23, 7, 90, 180, 1),
+  segLine(2, 23, 2, 9),
+  segArc(9, 9, 7, 180, 270, 1),
+  segLine(9, 2, 16, 2),
+];
 
 /**
  * 为指定分组（'other' 圆角方形 / 'gemini' 圆形）绘制 22×22px SVG 环与居中数字。
@@ -896,14 +979,8 @@ function buildRingContent(doc, shape, data) {
       });
       gTop.appendChild(createSvgNode(doc, 'path', { d: SQUARE_TOP_THREE_QUARTER_D, class: 'ag-qr-track' }));
       if (data.fiveHour > 0) {
-        gTop.appendChild(
-          createSvgNode(doc, 'path', {
-            d: SQUARE_TOP_THREE_QUARTER_D,
-            pathLength: 100,
-            'stroke-dasharray': `${data.fiveHour} 105`,
-            class: 'ag-qr-fill',
-          }),
-        );
+        const d = data.fiveHour >= 100 ? SQUARE_TOP_THREE_QUARTER_D : sliceSegmentedPath(SQUARE_TOP_SEGMENTS, data.fiveHour);
+        gTop.appendChild(createSvgNode(doc, 'path', { d, class: 'ag-qr-fill' }));
       }
       svg.appendChild(gTop);
 
@@ -917,14 +994,8 @@ function buildRingContent(doc, shape, data) {
       });
       gBottom.appendChild(createSvgNode(doc, 'path', { d: SQUARE_BOTTOM_LINE_D, class: 'ag-qr-track' }));
       if (data.weekly > 0) {
-        gBottom.appendChild(
-          createSvgNode(doc, 'path', {
-            d: SQUARE_BOTTOM_LINE_D,
-            pathLength: 100,
-            'stroke-dasharray': `${data.weekly} 105`,
-            class: 'ag-qr-fill',
-          }),
-        );
+        const d = data.weekly >= 100 ? SQUARE_BOTTOM_LINE_D : sliceSegmentedPath(SQUARE_BOTTOM_SEGMENTS, data.weekly);
+        gBottom.appendChild(createSvgNode(doc, 'path', { d, class: 'ag-qr-fill' }));
       }
       svg.appendChild(gBottom);
     } else {
@@ -937,14 +1008,8 @@ function buildRingContent(doc, shape, data) {
       });
       gSingle.appendChild(createSvgNode(doc, 'path', { d: SQUARE_FULL_TRACK_D, class: 'ag-qr-track' }));
       if (data.primary > 0) {
-        gSingle.appendChild(
-          createSvgNode(doc, 'path', {
-            d: SQUARE_FULL_PROGRESS_D,
-            pathLength: 100,
-            'stroke-dasharray': `${data.primary} 105`,
-            class: 'ag-qr-fill',
-          }),
-        );
+        const d = data.primary >= 100 ? SQUARE_FULL_TRACK_D : sliceSegmentedPath(SQUARE_FULL_SEGMENTS, data.primary);
+        gSingle.appendChild(createSvgNode(doc, 'path', { d, class: 'ag-qr-fill' }));
       }
       svg.appendChild(gSingle);
     }
@@ -997,15 +1062,12 @@ function buildRingContent(doc, shape, data) {
         'stroke-linecap': 'round',
       });
       gSingle.appendChild(createSvgNode(doc, 'circle', { cx: 16, cy: 16, r: 14, class: 'ag-qr-track' }));
-      if (data.primary > 0) {
+      if (data.primary >= 100) {
+        gSingle.appendChild(createSvgNode(doc, 'circle', { cx: 16, cy: 16, r: 14, class: 'ag-qr-fill' }));
+      } else if (data.primary > 0) {
         gSingle.appendChild(
-          createSvgNode(doc, 'circle', {
-            cx: 16,
-            cy: 16,
-            r: 14,
-            pathLength: 100,
-            'stroke-dasharray': `${data.primary} 105`,
-            transform: 'rotate(-90 16 16)',
+          createSvgNode(doc, 'path', {
+            d: describeCircleArc(0, (360 * data.primary) / 100, true),
             class: 'ag-qr-fill',
           }),
         );
