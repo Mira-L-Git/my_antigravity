@@ -5,6 +5,12 @@
 
 ---
 
+## v1.0.4 (2026-11-27)
+
+- **`quota-rings`**: Fixed quota ring display issues by replacing `pathLength` + `stroke-dasharray` (which Chromium stretched under `vector-effect="non-scaling-stroke"`) with exact segmented arc-length slicing, ensuring weekly, 5-hour, and single-window rings render accurate progress proportions across all percentages and DPI scales.
+
+---
+
 ## v1.0.3 (2026-11-27)
 
 - **`model-enhancer`**: When `Orchestrator` is selected, the original list and its planner/thinking-effort submenus are kept (no slider card), and picking a planner or effort inside the submenu no longer closes the popover, so you can keep adjusting.

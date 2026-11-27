@@ -372,30 +372,35 @@ test('main-hook: Windows 任务栏角标、会话去重、托盘聚合与销毁�
 });
 
 test('main-hook: 支持读取 plugin.json 版本号、远端版本比对及白名单打开 GitHub', async () => {
+  const pkgVersion = JSON.parse(
+    fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', 'package.json'), 'utf8'),
+  ).version;
+  const parts = pkgVersion.split('.').map(Number);
+  const nextPatchVersion = `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
   const tmpConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'my-agy-update-test-'));
   try {
     const pluginTarget = path.join(tmpConfigDir, 'plugins', 'my_antigravity');
     syncPlugins({ targetDir: pluginTarget });
 
-    assert.equal(mainHook.getAppVersion(tmpConfigDir), '1.0.3');
-    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, '1.0.3');
+    assert.equal(mainHook.getAppVersion(tmpConfigDir), pkgVersion);
+    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, pkgVersion);
 
     const latestRes = await mainHook.checkForUpdates({
       configDir: tmpConfigDir,
-      fetchJson: async () => ({ version: '1.0.3' }),
+      fetchJson: async () => ({ version: pkgVersion }),
     });
     assert.equal(latestRes.ok, true);
     assert.equal(latestRes.hasUpdate, false);
-    assert.equal(latestRes.currentVersion, '1.0.3');
-    assert.equal(latestRes.latestVersion, '1.0.3');
+    assert.equal(latestRes.currentVersion, pkgVersion);
+    assert.equal(latestRes.latestVersion, pkgVersion);
 
     const newerPatchRes = await mainHook.checkForUpdates({
       configDir: tmpConfigDir,
-      fetchJson: async () => ({ version: '1.0.4' }),
+      fetchJson: async () => ({ version: nextPatchVersion }),
     });
     assert.equal(newerPatchRes.ok, true);
     assert.equal(newerPatchRes.hasUpdate, true);
-    assert.equal(newerPatchRes.latestVersion, '1.0.4');
+    assert.equal(newerPatchRes.latestVersion, nextPatchVersion);
 
     const badUrlRes = await mainHook.openExternalUrl('https://evil.example.com');
     assert.equal(badUrlRes.ok, false);
