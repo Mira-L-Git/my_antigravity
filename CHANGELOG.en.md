@@ -5,6 +5,14 @@
 
 ---
 
+## v1.0.3 (2026-11-27)
+
+- **`model-enhancer`**: When `Orchestrator` is selected, the original list and its planner/thinking-effort submenus are kept (no slider card), and picking a planner or effort inside the submenu no longer closes the popover, so you can keep adjusting.
+- **`zh-cn`**: Added Chinese translations for `Extra High`, `Max`, `Thinking effort`, `Leaving Soon`, and Orchestrator-related hints.
+- **`taskbar-badge`**: Reworked tray and taskbar badge logic: the tray dot shows status with the exact count in its tooltip, reminders clear by conversation focus, and WebSocket reconnects or late requests no longer re-trigger reminders.
+
+---
+
 ## v1.0.2 (2026-11-27)
 
 - **Fixed `dino-game` UI display bugs**: Removed fallback toolbar mounting and enforced strict detection requiring both the right auxiliary pane's New Tab menu list and URL search bar, ensuring the Chrome Dino trigger appears strictly beside `⋮` on the New Tab view and no longer leaks into Review, Browser, workspace file tree, or model picker popovers.
