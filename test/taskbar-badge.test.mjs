@@ -5,6 +5,8 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { getShortSummary } from '../plugins/mod-manager/src/manager-core.js';
 import { buildTaskbarBadgePlugin } from '../plugins/taskbar-badge/build.mjs';
+import { inspectActiveConversation, installTaskbarBadgePlugin } from '../plugins/taskbar-badge/src/entry.js';
+import { installAttentionTransportTap } from '../plugins/taskbar-badge/src/transport-tap.js';
 import {
   LEVEL_PRIORITY,
   classifyRunStatus,
@@ -13,13 +15,10 @@ import {
   extractUpdateSignal,
 } from '../plugins/taskbar-badge/src/badge-core.js';
 import {
-  OVERLAY_DPI_SPECS,
-  TASKBAR_BADGE_STYLES,
   TRAY_DOT_COLORS,
   createIconRenderer,
   drawTaskbarOverlayIcon,
   drawTrayDottedIcon,
-  formatBadgeCount,
 } from '../plugins/taskbar-badge/src/icon-renderer.js';
 
 function createConnectFrame(obj, flags = 0) {
@@ -30,6 +29,137 @@ function createConnectFrame(obj, flags = 0) {
   payload.copy(frame, 5);
   return frame;
 }
+
+test('WebSocket 重连首帧补发完成，历史状态与已关闭的连接不重复发提醒', () => {
+  class MockSocket extends EventTarget {
+    send() {}
+    receive(update) {
+      this.dispatchEvent(new MessageEvent('message', {
+        data: JSON.stringify({ type: 'data', streamId: '1', payload: { update } }),
+      }));
+    }
+  }
+  const win = { WebSocket: MockSocket };
+  const tracker = createBadgeTracker();
+  installAttentionTransportTap(win, { onAgentStateUpdate: tracker.applyUpdate });
+  function connect() {
+    const socket = new win.WebSocket('ws://localhost/connect-websocket');
+    socket.send(JSON.stringify({ type: 'start', streamId: '1', procedure: 'StreamAgentStateUpdates' }));
+    return socket;
+  }
+  const first = connect();
+  first.receive({ conversationId: 'background', status: 2 });
+  first.dispatchEvent(new Event('close'));
+  const current = connect();
+  current.receive({ conversationId: 'background', status: 1 });
+  assert.equal(tracker.getSnapshot().level, 'completed');
+  first.receive({ conversationId: 'other', status: 'ERROR' });
+  assert.equal(tracker.getSnapshot().count, 1);
+});
+
+test('旧快照无法把已查看的实时提醒重新加回来，新的实时回合仍可提醒', () => {
+  const tracker = createBadgeTracker();
+  const apply = (status, source, generation) => tracker.applyUpdate(
+    { conversationId: 'background', status }, { source, generation },
+  );
+  apply(2, 'manager');
+  apply('ERROR', 'stream', 2);
+  tracker.markConversationViewed('background');
+  apply(2, 'stream', 1);
+  apply(2, 'manager');
+  apply(2, 'trajectory');
+  apply('ERROR', 'stream', 2);
+  assert.equal(tracker.getSnapshot().count, 0);
+  apply(2, 'stream', 2);
+  apply('ERROR', 'stream', 2);
+  assert.equal(tracker.getSnapshot().count, 1);
+});
+
+test('fetch 轨迹请求晚到时保留新请求的结果', async () => {
+  const pending = [];
+  const win = { fetch: () => new Promise((resolve) => pending.push(resolve)) };
+  const tracker = createBadgeTracker();
+  installAttentionTransportTap(win, {
+    onTrajectory: (cid, payload, meta) => tracker.applyUpdate({ conversationId: cid, status: payload.status }, meta),
+  });
+  const request = () => win.fetch('http://localhost/GetCascadeTrajectory');
+  const response = (status) => ({
+    ok: true,
+    clone: () => ({
+      headers: { get: () => 'application/json' },
+      json: async () => ({ trajectory: { cascadeId: 'background' }, status }),
+    }),
+  });
+  const older = request();
+  const newer = request();
+  pending[1](response(1));
+  await newer;
+  pending[0](response(2));
+  await older;
+  const next = request();
+  pending[2](response(1));
+  await next;
+  await new Promise(setImmediate);
+  assert.equal(tracker.getSnapshot().count, 0);
+});
+
+test('分栏按会话焦点判断，切到会话外时不随 DOM 顺序清除提醒', () => {
+  const box = (cascadeId) => ({ __reactFiber$test: { memoizedProps: { cascadeId } } });
+  const left = box('left');
+  const right = box('right');
+  const outside = {};
+  const doc = {
+    activeElement: right,
+    querySelectorAll: (selector) => selector.includes('agent-input-box') ? [left, right] : [],
+  };
+  assert.equal(inspectActiveConversation(doc).conversationId, 'right');
+  doc.activeElement = outside;
+  assert.equal(inspectActiveConversation(doc).conversationId, null);
+  assert.equal(inspectActiveConversation(doc, null, right).conversationId, 'right');
+});
+
+test('托盘底图与任务栏 IPC 独立恢复，相同计数也会重试', async () => {
+  let baseAttempts = 0;
+  const calls = [];
+  const retryCallbacks = new Map();
+  let timerId = 0;
+  const win = {
+    setTimeout(fn, delay) {
+      retryCallbacks.set(++timerId, { fn, delay });
+      return timerId;
+    },
+    clearTimeout(id) { retryCallbacks.delete(id); },
+    Image: class {
+      set src(_) { queueMicrotask(() => this.onload()); }
+    },
+    __myAntigravityAttention: {
+      async getBaseIcon() {
+        if (++baseAttempts === 1) throw Error('temporary failure');
+        return { ok: true, dataUrl: 'data:image/png;base64,BASE' };
+      },
+      async setAttentionState(payload) {
+        calls.push(payload);
+        return calls.length === 1 ? { ok: false } : { ok: true };
+      },
+    },
+  };
+  const ctx = new Proxy({}, { get: () => () => {} });
+  const doc = { createElement: () => ({ getContext: () => ctx, toDataURL: () => 'data:image/png;base64,TRAY' }) };
+  const plugin = installTaskbarBadgePlugin(win, doc);
+  plugin.tracker.applyUpdate({ conversationId: 'background', status: 'ERROR' });
+  await plugin.flushIconsNow();
+  assert.ok(retryCallbacks.size > 0);
+  await new Promise(setImmediate);
+  assert.equal(calls[0].count, 1);
+  assert.equal(calls[0].windowReps.length, 5);
+  assert.equal(calls[0].trayPngDataUrl, null);
+  await plugin.flushIconsNow();
+  await new Promise(setImmediate);
+  await plugin.flushIconsNow();
+  assert.equal(calls.at(-1).count, 1);
+  assert.equal(calls.at(-1).trayPngDataUrl, 'data:image/png;base64,TRAY');
+  plugin.dispose();
+});
 
 test('badge-core: 状态识别、优先级(报错>>提问>>完成)、去重及点开消减归零', () => {
   assert.equal(classifyRunStatus(2), 'running');
@@ -157,13 +287,7 @@ test('badge-core: 用户取消不计入完成；水合期运行中会话随后�
   assert.ok(LEVEL_PRIORITY.approval > LEVEL_PRIORITY.completed);
 });
 
-test('icon-renderer: 正确使用深灰/黄/红与托盘绿/黄/红配色，并支持 99+ 与缓存', async () => {
-  assert.equal(formatBadgeCount(0), '');
-  assert.equal(formatBadgeCount(1), '1');
-  assert.equal(formatBadgeCount(120), '99+');
-  assert.equal(TASKBAR_BADGE_STYLES.completed.fill, '#27272A');
-  assert.equal(TASKBAR_BADGE_STYLES.approval.fill, '#FACC15');
-  assert.equal(TASKBAR_BADGE_STYLES.error.fill, '#EF4444');
+test('icon-renderer: 托盘保留绿/黄/红状态，按颜色复用底图和 PNG', async () => {
   assert.equal(TRAY_DOT_COLORS.completed, '#22C55E');
   assert.equal(TRAY_DOT_COLORS.approval, '#FACC15');
   assert.equal(TRAY_DOT_COLORS.error, '#EF4444');
@@ -175,37 +299,31 @@ test('icon-renderer: 正确使用深灰/黄/红与托盘绿/黄/红配色，并�
       fillStyle: '',
       strokeStyle: '',
       lineWidth: 1,
-      font: '',
-      textAlign: '',
-      textBaseline: '',
-      shadowColor: '',
-      shadowBlur: 0,
-      shadowOffsetY: 0,
       clearRect: (...a) => ops.push(['clearRect', ...a]),
       drawImage: (...a) => ops.push(['drawImage', ...a]),
       save: () => ops.push(['save']),
       restore: () => ops.push(['restore']),
       beginPath: () => ops.push(['beginPath']),
-      moveTo: (...a) => ops.push(['moveTo', ...a]),
-      arcTo: (...a) => ops.push(['arcTo', ...a]),
+      moveTo: () => {},
+      arcTo: () => {},
+      closePath: () => {},
       arc: (...a) => ops.push(['arc', ...a]),
-      closePath: () => ops.push(['closePath']),
       fill() {
         ops.push(['fill', this.fillStyle]);
       },
       stroke() {
         ops.push(['stroke', this.strokeStyle]);
       },
-      fillText(text, x, y) {
-        ops.push(['fillText', text, x, y, this.fillStyle]);
+      fillText(text) {
+        ops.push(['text', text, this.fillStyle]);
       },
     };
   }
 
-  const winCtx = makeMockCtx();
-  drawTaskbarOverlayIcon(winCtx, 3, 'completed', 24);
-  assert.ok(winCtx.ops.some((op) => op[0] === 'fill' && op[1] === '#27272A'));
-  assert.ok(winCtx.ops.some((op) => op[0] === 'fillText' && op[1] === '3' && op[4] === '#FFFFFF'));
+  const badgeCtx = makeMockCtx();
+  drawTaskbarOverlayIcon(badgeCtx, 103, 'approval', 16);
+  assert.ok(badgeCtx.ops.some(([op, color]) => op === 'fill' && color === '#FACC15'));
+  assert.ok(badgeCtx.ops.some(([op, text, color]) => op === 'text' && text === '99+' && color === '#111827'));
 
   const trayCtx = makeMockCtx();
   drawTrayDottedIcon(trayCtx, { fake: true }, 'completed', 64);
@@ -246,18 +364,20 @@ test('icon-renderer: 正确使用深灰/黄/红与托盘绿/黄/红配色，并�
     },
   });
 
-  const first = await renderer.renderIcons(2, 'approval');
-  const second = await renderer.renderIcons(2, 'approval');
-  assert.deepEqual(first, second);
-  assert.equal(first.windowReps.length, OVERLAY_DPI_SPECS.length);
+  const first = await renderer.renderTrayIcon('approval');
+  const second = await renderer.renderTrayIcon('approval');
+  assert.equal(first, second);
+  assert.notEqual(await renderer.renderTrayIcon('error'), first);
   assert.equal(getBaseCalls, 1);
-  assert.equal(canvasDraws, OVERLAY_DPI_SPECS.length + 1); // 多 DPI Overlay 图 + 托盘图仅绘制一次，第二次命中缓存
-
-  const zero = await renderer.renderIcons(0, 'none');
-  assert.deepEqual(zero, { windowPngDataUrl: null, windowReps: null, trayPngDataUrl: null });
+  assert.equal(canvasDraws, 2);
+  assert.equal(await renderer.renderTrayIcon('none'), null);
+  const overlay = renderer.renderTaskbarIcon(2, 'completed');
+  assert.deepEqual(overlay.windowReps.map((rep) => rep.width), [16, 20, 24, 32, 40]);
+  assert.equal(renderer.renderTaskbarIcon(2, 'completed'), overlay);
+  assert.equal(canvasDraws, 7);
 });
 
-test('build & 集成测试: 打包产物 index.js 能在主世界监听后台事件并随点击切换消减图标', async () => {
+test('build & 集成测试: 打包产物 index.js 能在主世界监听后台事件并随点击切换消减图标', async (t) => {
   const buildRes = buildTaskbarBadgePlugin();
   const code = fs.readFileSync(buildRes.outPath, 'utf8');
 
@@ -359,6 +479,7 @@ test('build & 集成测试: 打包产物 index.js 能在主世界监听后台事
     console,
   };
   vm.runInNewContext(code, context);
+  t.after(() => { for (const fn of winListeners.get('pagehide') || []) fn(); });
 
   const socket = new fakeWin.WebSocket('wss://127.0.0.1/connect-websocket');
   socket.send(
@@ -395,11 +516,12 @@ test('build & 集成测试: 打包产物 index.js 能在主世界监听后台事
     }),
   });
 
-  await new Promise((r) => setTimeout(r, 120));
+  await new Promise((r) => setTimeout(r, 180));
   assert.ok(pushedStates.length >= 1);
   assert.equal(pushedStates.at(-1).count, 1);
   assert.equal(pushedStates.at(-1).level, 'completed');
-  assert.equal(pushedStates.at(-1).windowPngDataUrl, 'data:image/png;base64,RENDERED');
+  assert.equal(pushedStates[0].windowReps.length, 5);
+  assert.equal(pushedStates[0].trayPngDataUrl, null);
   assert.equal(pushedStates.at(-1).trayPngDataUrl, 'data:image/png;base64,RENDERED');
 
   // 用户点开 c-bg1，计数归 0 并恢复原图标
@@ -409,11 +531,8 @@ test('build & 集成测试: 打包产物 index.js 能在主世界监听后台事
 
   assert.equal(pushedStates.at(-1).count, 0);
   assert.equal(pushedStates.at(-1).level, 'none');
-  assert.equal(pushedStates.at(-1).windowPngDataUrl, null);
   assert.equal(pushedStates.at(-1).trayPngDataUrl, null);
   assert.ok(wsInstance);
-  // 触发 pagehide 清理定时器
-  for (const fn of winListeners.get('pagehide') || []) fn();
   void createConnectFrame;
 });
 

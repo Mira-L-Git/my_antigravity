@@ -16,6 +16,8 @@ const LEVEL_PRIORITY = {
   error: 3,
 };
 
+const SOURCE_PRIORITY = { trajectory: 0, manager: 1, stream: 2 };
+
 /**
  * 规范化 CascadeRunStatus（兼容数字枚举与字符串枚举）。
  * @returns {'running' | 'approval' | 'error' | 'cancelled' | 'idle' | null}
@@ -222,7 +224,7 @@ function createBadgeTracker(initialViewing = {}) {
     return { changed, snapshot: getSnapshot() };
   }
 
-  function applyUpdate(update, { isInitialHydration = false } = {}) {
+  function applyUpdate(update, { isInitialHydration = false, source = 'stream', generation = 0 } = {}) {
     if (!update || typeof update !== 'object') {
       return { changed: false, snapshot: getSnapshot() };
     }
@@ -238,9 +240,18 @@ function createBadgeTracker(initialViewing = {}) {
 
     let sess = sessions.get(conversationId);
     if (!sess) {
-      sess = { wasActive: false, lastKind: null };
+      sess = { wasActive: false, lastKind: null, source, generation };
       sessions.set(conversationId, sess);
     }
+    // 拉取的旧轨迹和轮询快照不能覆盖实时更新。重连后忽略旧订阅的帧。
+    if (SOURCE_PRIORITY[source] < SOURCE_PRIORITY[sess.source] ||
+        (source === sess.source && generation < sess.generation)) {
+      return { changed: false, snapshot: getSnapshot() };
+    }
+    const baseline = isInitialHydration && (sess.lastKind === null ||
+      (sess.source === 'trajectory' && source !== 'trajectory' && !sess.wasActive));
+    sess.source = source;
+    sess.generation = generation;
 
     let changed = false;
     if (signal === 'running') {
@@ -248,13 +259,13 @@ function createBadgeTracker(initialViewing = {}) {
       sess.lastKind = 'running';
     } else if (signal === 'error') {
       // 避免用户已点开消掉同一报错后，后续无状态变化的心跳重复加回角标
-      if (!isInitialHydration && (sess.wasActive || sess.lastKind !== 'error')) {
+      if (!baseline && (sess.wasActive || sess.lastKind !== 'error')) {
         changed = triggerUnread(conversationId, 'error');
       }
       sess.wasActive = false;
       sess.lastKind = 'error';
     } else if (signal === 'approval') {
-      if (!isInitialHydration && (sess.wasActive || sess.lastKind !== 'approval')) {
+      if (!baseline && (sess.wasActive || sess.lastKind !== 'approval')) {
         changed = triggerUnread(conversationId, 'approval');
       }
       sess.wasActive = false;
@@ -263,7 +274,7 @@ function createBadgeTracker(initialViewing = {}) {
       sess.wasActive = false;
       sess.lastKind = 'cancelled';
     } else if (signal === 'idle') {
-      if (!isInitialHydration && sess.wasActive) {
+      if (!baseline && sess.wasActive) {
         changed = triggerUnread(conversationId, 'completed');
       }
       sess.wasActive = false;
@@ -375,11 +386,13 @@ function installAttentionTransportTap(win, handlers = {}) {
   }
   win.__myAntigravityTaskbarBadgeTapInstalled = true;
 
-  const activeStreams = new Map();
+  const streamsBySocket = new WeakMap();
+  let requestGeneration = 0;
+  let stopped = false;
   const OrigWebSocket = win.WebSocket;
   const origFetch = typeof win.fetch === 'function' ? win.fetch.bind(win) : null;
 
-  function handleOutboundText(raw, socket) {
+  function handleOutboundText(raw, activeStreams) {
     if (typeof raw !== 'string' || raw[0] !== '{') return;
     let msg;
     try {
@@ -398,7 +411,7 @@ function installAttentionTransportTap(win, handlers = {}) {
         activeStreams.set(msg.streamId, {
           kind: 'state',
           conversationId: cid,
-          socket,
+          generation: ++requestGeneration,
           receivedFirstFrame: false,
         });
       } else if (
@@ -410,14 +423,14 @@ function installAttentionTransportTap(win, handlers = {}) {
         activeStreams.set(msg.streamId, {
           kind: 'trajectory',
           conversationId: cid,
-          socket,
+          generation: ++requestGeneration,
           receivedFirstFrame: false,
         });
       }
     }
   }
 
-  function handleInboundText(raw) {
+  function handleInboundText(raw, activeStreams) {
     if (typeof raw !== 'string' || raw[0] !== '{') return;
     let msg;
     try {
@@ -437,15 +450,22 @@ function installAttentionTransportTap(win, handlers = {}) {
       return;
     }
 
-    const isFirst = !meta.receivedFirstFrame;
-    meta.receivedFirstFrame = true;
-
     if (meta.kind === 'state' && msg.payload.update) {
-      onAgentStateUpdate?.(msg.payload.update, { isInitialHydration: isFirst });
+      onAgentStateUpdate?.(msg.payload.update, {
+        isInitialHydration: !meta.receivedFirstFrame,
+        source: 'stream',
+        generation: meta.generation,
+      });
+      meta.receivedFirstFrame = true;
     } else if (meta.kind === 'trajectory' && msg.payload.trajectory) {
       const cid = meta.conversationId || msg.payload.trajectory?.cascadeId || null;
       if (cid) {
-        onTrajectory?.(cid, msg.payload, { isInitialHydration: isFirst });
+        onTrajectory?.(cid, msg.payload, {
+          isInitialHydration: !meta.receivedFirstFrame,
+          source: 'trajectory',
+          generation: meta.generation,
+        });
+        meta.receivedFirstFrame = true;
       }
     }
   }
@@ -461,15 +481,14 @@ function installAttentionTransportTap(win, handlers = {}) {
         try {
           const urlStr = String(url || '');
           if (urlStr.includes('/connect-websocket')) {
+            const activeStreams = new Map();
+            streamsBySocket.set(this, activeStreams);
             this.addEventListener('message', (event) => {
-              handleInboundText(event?.data);
+              if (!stopped) handleInboundText(event?.data, activeStreams);
             });
             this.addEventListener('close', () => {
-              for (const [id, meta] of activeStreams.entries()) {
-                if (meta.socket === this) {
-                  activeStreams.delete(id);
-                }
-              }
+              activeStreams.clear();
+              streamsBySocket.delete(this);
             });
           }
         } catch {
@@ -479,7 +498,8 @@ function installAttentionTransportTap(win, handlers = {}) {
 
       send(data) {
         try {
-          handleOutboundText(data, this);
+          const activeStreams = streamsBySocket.get(this);
+          if (!stopped && activeStreams) handleOutboundText(data, activeStreams);
         } catch {
           // 旁路失败绝不阻断原发送
         }
@@ -504,14 +524,31 @@ function installAttentionTransportTap(win, handlers = {}) {
       const fallbackCid = isTrajectory ? extractRequestConversationId(init?.body) : null;
 
       const resPromise = origFetch(input, init);
-      if (!isStateStream && !isTrajectory) {
+      if (stopped || (!isStateStream && !isTrajectory)) {
         return resPromise;
+      }
+      const generation = ++requestGeneration;
+
+      function observeMessage(obj, isInitialHydration) {
+        if (stopped) return false;
+        if (isStateStream && obj?.update) {
+          onAgentStateUpdate?.(obj.update, { isInitialHydration, source: 'stream', generation });
+          return true;
+        }
+        if (isTrajectory && obj?.trajectory) {
+          const cid = fallbackCid || obj.trajectory.cascadeId;
+          if (cid) {
+            onTrajectory?.(cid, obj, { isInitialHydration, source: 'trajectory', generation });
+            return true;
+          }
+        }
+        return false;
       }
 
       resPromise
         .then((response) => {
           try {
-            if (!response || !response.ok || typeof response.clone !== 'function') {
+            if (stopped || !response || !response.ok || typeof response.clone !== 'function') {
               return;
             }
             const cloned = response.clone();
@@ -520,16 +557,7 @@ function installAttentionTransportTap(win, handlers = {}) {
             if (ct.includes('application/json') && !ct.includes('connect')) {
               void cloned
                 .json()
-                .then((obj) => {
-                  if (isStateStream && obj?.update) {
-                    onAgentStateUpdate?.(obj.update, { isInitialHydration: false });
-                  } else if (isTrajectory && obj?.trajectory) {
-                    const cid = fallbackCid || obj?.trajectory?.cascadeId || null;
-                    if (cid) {
-                      onTrajectory?.(cid, obj, { isInitialHydration: false });
-                    }
-                  }
-                })
+                .then((obj) => observeMessage(obj, true))
                 .catch(() => {});
               return;
             }
@@ -538,16 +566,7 @@ function installAttentionTransportTap(win, handlers = {}) {
               let first = true;
               const reader = cloned.body.getReader();
               const parser = createConnectEnvelopeParser((obj) => {
-                const isFirst = first;
-                first = false;
-                if (isStateStream && obj?.update) {
-                  onAgentStateUpdate?.(obj.update, { isInitialHydration: isFirst });
-                } else if (isTrajectory && obj?.trajectory) {
-                  const cid = fallbackCid || obj.trajectory?.cascadeId || null;
-                  if (cid) {
-                    onTrajectory?.(cid, obj, { isInitialHydration: isFirst });
-                  }
-                }
+                if (observeMessage(obj, first)) first = false;
               });
               (async () => {
                 try {
@@ -572,18 +591,11 @@ function installAttentionTransportTap(win, handlers = {}) {
   }
 
   return () => {
-    activeStreams.clear();
+    stopped = true;
   };
 }
 
 // --- icon-renderer.js ---
-/**
- * icon-renderer：基于原生 HTML5 Canvas 合成多 DPI 任务栏 Overlay 角标与系统托盘状态圆点。
- * - 任务栏 Overlay（16/20/24/32/40 多倍率逐档原生绘制，供 win.setOverlayIcon 使用）：
- *   去掉易发糊的细描边与外留白，最大化数字字号与像素对齐；
- *   完成深灰 #27272A，审批黄色 #FACC15，报错红色 #EF4444
- * - 托盘（64×64）：在原图标白色圆角方框右上角绘制 2 倍大小绿/黄/红状态圆点
- */
 const TASKBAR_BADGE_STYLES = {
   completed: {
     fill: '#27272A',
@@ -597,11 +609,6 @@ const TASKBAR_BADGE_STYLES = {
     fill: '#EF4444',
     text: '#FFFFFF',
   },
-};
-const TRAY_DOT_COLORS = {
-  completed: '#22C55E',
-  approval: '#FACC15',
-  error: '#EF4444',
 };
 const OVERLAY_DPI_SPECS = [
   { scaleFactor: 1.0, size: 16 },
@@ -669,6 +676,11 @@ function drawTaskbarOverlayIcon(ctx, count, level, size = 32) {
   ctx.fillText(label, size / 2, size / 2 + Math.max(0.5, size * 0.03));
   ctx.restore();
 }
+const TRAY_DOT_COLORS = {
+  completed: '#22C55E',
+  approval: '#FACC15',
+  error: '#EF4444',
+};
 
 /**
  * 绘制系统托盘图标：圆点直径约占画布 50%，底图微向左下偏移，
@@ -708,7 +720,30 @@ function drawTrayDottedIcon(ctx, baseImg, level, size = 64) {
 }
 function createIconRenderer(win, doc, bridge) {
   let baseImgPromise = null;
+  let cachedOverlay = null;
   const cache = new Map();
+
+  function renderTaskbarIcon(count, level) {
+    const label = formatBadgeCount(count);
+    if (!label || !Object.hasOwn(TASKBAR_BADGE_STYLES, level)) return {};
+    if (cachedOverlay?.label === label && cachedOverlay.level === level) return cachedOverlay.icons;
+
+    const windowReps = [];
+    for (const { scaleFactor, size } of OVERLAY_DPI_SPECS) {
+      const canvas = doc.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext?.('2d');
+      if (!ctx) continue;
+      drawTaskbarOverlayIcon(ctx, count, level, size);
+      const dataUrl = canvas.toDataURL('image/png');
+      if (dataUrl) windowReps.push({ scaleFactor, width: size, height: size, dataUrl });
+    }
+    const windowPngDataUrl = windowReps.find((rep) => rep.scaleFactor === 2)?.dataUrl || windowReps.at(-1)?.dataUrl;
+    const icons = { windowReps, windowPngDataUrl };
+    if (windowPngDataUrl) cachedOverlay = { label, level, icons };
+    return icons;
+  }
 
   function loadImageFromDataUrl(dataUrl) {
     return new Promise((resolve) => {
@@ -723,7 +758,7 @@ function createIconRenderer(win, doc, bridge) {
     });
   }
 
-  async function ensureBaseImage() {
+  function ensureBaseImage() {
     if (!baseImgPromise) {
       baseImgPromise = (async () => {
         if (!bridge || typeof bridge.getBaseIcon !== 'function') {
@@ -734,80 +769,35 @@ function createIconRenderer(win, doc, bridge) {
           return null;
         }
         return loadImageFromDataUrl(res.dataUrl);
-      })();
+      })().catch(() => null).then((img) => {
+        if (!img) baseImgPromise = null;
+        return img;
+      });
     }
     return baseImgPromise;
   }
 
-  async function renderIcons(count, level) {
-    const label = formatBadgeCount(count);
-    if (!label || !level || level === 'none') {
-      return { windowPngDataUrl: null, windowReps: null, trayPngDataUrl: null };
-    }
-    const cacheKey = `${label}:${level}`;
-    if (cache.has(cacheKey)) {
-      return cache.get(cacheKey);
-    }
-
-    if (typeof doc?.createElement !== 'function') {
-      return { windowPngDataUrl: null, windowReps: null, trayPngDataUrl: null };
-    }
-
-    const windowReps = [];
-    let windowPngDataUrl = null;
-    for (const spec of OVERLAY_DPI_SPECS) {
-      const winCanvas = doc.createElement('canvas');
-      winCanvas.width = spec.size;
-      winCanvas.height = spec.size;
-      const winCtx = winCanvas.getContext?.('2d');
-      if (!winCtx) continue;
-      drawTaskbarOverlayIcon(winCtx, count, level, spec.size);
-      const dataUrl = winCanvas.toDataURL('image/png');
-      if (dataUrl) {
-        windowReps.push({
-          scaleFactor: spec.scaleFactor,
-          width: spec.size,
-          height: spec.size,
-          dataUrl,
-        });
-        if (spec.size === 32) {
-          windowPngDataUrl = dataUrl;
-        }
-      }
-    }
-    if (!windowPngDataUrl && windowReps.length > 0) {
-      windowPngDataUrl = windowReps[windowReps.length - 1].dataUrl;
-    }
-
-    let trayPngDataUrl = null;
+  async function renderTrayIcon(level) {
+    if (cache.has(level)) return cache.get(level);
+    if (!TRAY_DOT_COLORS[level] || typeof doc?.createElement !== 'function') return null;
     const baseImg = await ensureBaseImage();
-    if (baseImg) {
-      const trayCanvas = doc.createElement('canvas');
-      trayCanvas.width = 64;
-      trayCanvas.height = 64;
-      const trayCtx = trayCanvas.getContext?.('2d');
-      if (trayCtx) {
-        drawTrayDottedIcon(trayCtx, baseImg, level, 64);
-        trayPngDataUrl = trayCanvas.toDataURL('image/png');
-      }
-    }
-
-    const result = { windowPngDataUrl, windowReps, trayPngDataUrl };
-    if (windowPngDataUrl && trayPngDataUrl) {
-      if (cache.size >= 64) {
-        const oldestKey = cache.keys().next().value;
-        cache.delete(oldestKey);
-      }
-      cache.set(cacheKey, result);
-    }
-    return result;
+    if (!baseImg) return null;
+    if (cache.has(level)) return cache.get(level);
+    const canvas = doc.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext?.('2d');
+    if (!ctx) return null;
+    drawTrayDottedIcon(ctx, baseImg, level, 64);
+    const dataUrl = canvas.toDataURL('image/png');
+    if (dataUrl) cache.set(level, dataUrl);
+    return dataUrl;
   }
 
   return {
-    renderIcons,
-    clearCache() {
-      cache.clear();
-    },
+    renderTaskbarIcon,
+    renderTrayIcon,
+    getCachedTrayIcon: (level) => cache.get(level) || null,
   };
 }
 
@@ -816,7 +806,7 @@ function createIconRenderer(win, doc, bridge) {
  * taskbar-badge 运行时入口：
  * - 旁路监听会话状态跃迁，追踪后台/非当前会话的 完成 / 提问审批 / 报错；
  * - 结合 React Fiber 读取当前正在查看的 conversationId 与窗口聚焦状态，点开对应会话自动消减；
- * - 通过 __myAntigravityAttention IPC 同步更新 Windows 任务栏数字角标与托盘圆点。
+ * - 通过 __myAntigravityAttention IPC 同步更新任务栏状态与托盘圆点。
  */
 
 
@@ -836,10 +826,15 @@ function isElementVisible(win, el) {
   return true;
 }
 
+function getElementFiber(el) {
+  const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+  return key ? el[key] : null;
+}
+
 /**
  * 沿聊天输入框 React Fiber 树只读提取当前展示的 cascadeId 及可选 stateManager。
  */
-function inspectActiveConversation(doc, win = null) {
+function inspectActiveConversation(doc, win = null, interactionTarget = null) {
   if (!doc?.querySelectorAll) {
     return { conversationId: null, stateManager: null };
   }
@@ -847,17 +842,12 @@ function inspectActiveConversation(doc, win = null) {
     ...doc.querySelectorAll('[data-testid="agent-input-box"]'),
     ...doc.querySelectorAll('[contenteditable="true"][data-lexical-editor="true"]'),
   ];
-  // 优先扫描当前可见的输入框，避免后台/分栏隐藏容器干扰当前会话判定
-  boxes.sort((a, b) => Number(isElementVisible(win, b)) - Number(isElementVisible(win, a)));
-
+  const visibleConversations = new Map();
+  const inputs = new Map();
   let fallbackStateManager = null;
   for (const el of boxes) {
     if (!el || typeof el !== 'object') continue;
-    const keys = Object.keys(el);
-    const fiberKey = keys.find(
-      (k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'),
-    );
-    let fiber = fiberKey ? el[fiberKey] : null;
+    let fiber = getElementFiber(el);
     let conversationId = null;
     let inExistingConversation = true;
     let foundExisting = false;
@@ -892,9 +882,34 @@ function inspectActiveConversation(doc, win = null) {
     if (stateManager && !fallbackStateManager) {
       fallbackStateManager = stateManager;
     }
-    if (conversationId && inExistingConversation && isElementVisible(win, el)) {
-      return { conversationId, stateManager: stateManager || fallbackStateManager };
+    if (isElementVisible(win, el)) {
+      const cid = inExistingConversation ? conversationId : null;
+      inputs.set(el, cid);
+      if (cid) visibleConversations.set(cid, stateManager || visibleConversations.get(cid));
     }
+  }
+
+  for (const target of [interactionTarget, doc.activeElement]) {
+    if (!target || target.isConnected === false) continue;
+    for (const [input, cid] of inputs) {
+      if (input === target || input.contains?.(target)) {
+        return { conversationId: cid, stateManager: visibleConversations.get(cid) || fallbackStateManager };
+      }
+    }
+    for (let node = target; node && node.isConnected !== false; node = node.parentElement) {
+      let fiber = getElementFiber(node);
+      for (let steps = 0; fiber && steps < 60; steps += 1, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        const cid = props?.cascadeId || props?.conversationId;
+        if (visibleConversations.has(cid)) {
+          return { conversationId: cid, stateManager: visibleConversations.get(cid) || fallbackStateManager };
+        }
+      }
+    }
+  }
+  if (visibleConversations.size === 1 && ![...inputs.values()].includes(null)) {
+    const [[conversationId, stateManager]] = visibleConversations;
+    return { conversationId, stateManager: stateManager || fallbackStateManager };
   }
   return { conversationId: null, stateManager: fallbackStateManager };
 }
@@ -918,70 +933,83 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
   const renderer = createIconRenderer(win, doc, bridge);
 
   let pushTimer = null;
+  let pushDelay = 0;
   let lastPushedSig = '';
-  let pushSeq = 0;
+  let retryDelay = 500;
+  let flushing = false;
+  let trayRenderPending = false;
   let stopped = false;
 
-  async function pushIconState(count, level) {
+  async function pushIconState(count, level, trayPngDataUrl = null, conversationIds = []) {
     if (!bridge || typeof bridge.setAttentionState !== 'function') {
       return { ok: false, reason: 'no-bridge' };
     }
-    const mySeq = ++pushSeq;
-    if (count <= 0 || level === 'none') {
-      return await bridge.setAttentionState({
-        count: 0,
-        level: 'none',
-        windowPngDataUrl: null,
-        windowReps: null,
-        trayPngDataUrl: null,
-      });
+    let overlay = {};
+    try {
+      overlay = renderer.renderTaskbarIcon(count, level);
+    } catch {
+      // 角标绘制失败时托盘仍可更新，主进程报告失败后重试。
     }
-    const { windowPngDataUrl, windowReps, trayPngDataUrl } = await renderer.renderIcons(
-      count,
-      level,
-    );
-    if (stopped || mySeq !== pushSeq) {
-      return { ok: false, reason: 'superseded' };
-    }
-    return await bridge.setAttentionState({
-      count,
-      level,
-      windowPngDataUrl,
-      windowReps,
-      trayPngDataUrl,
-    });
+    return bridge.setAttentionState({ count, level, ...overlay, trayPngDataUrl, conversationIds });
   }
 
   async function flushIconsNow() {
-    if (stopped || !bridge || typeof bridge.setAttentionState !== 'function') {
-      return;
-    }
+    if (stopped || flushing || typeof bridge?.setAttentionState !== 'function') return;
     const snap = tracker.getSnapshot();
-    const sig = `${snap.count}:${snap.level}`;
-    if (sig === lastPushedSig) {
-      return;
+    const trayIcon = snap.count > 0 ? renderer.getCachedTrayIcon(snap.level) : null;
+    const needsTray = snap.count > 0 && !trayIcon;
+    if (needsTray && !trayRenderPending) {
+      trayRenderPending = true;
+      void renderer.renderTrayIcon(snap.level).catch(() => null).then((icon) => {
+        trayRenderPending = false;
+        if (icon || tracker.getSnapshot().level !== snap.level) scheduleIconSync();
+      });
     }
-    lastPushedSig = sig;
+
+    const sig = JSON.stringify([snap.level, snap.unreadConversationIds, Boolean(trayIcon)]);
+    let retry = needsTray;
+    flushing = true;
     try {
-      await pushIconState(snap.count, snap.level);
+      if (sig !== lastPushedSig) {
+        const result = await pushIconState(snap.count, snap.level, trayIcon, snap.unreadConversationIds);
+        if (result?.ok && result.updatedWindow !== false && result.updatedTray !== false) {
+          lastPushedSig = sig;
+        } else {
+          retry = true;
+        }
+      }
     } catch {
-      // 忽略偶发 IPC 错误，避免影响聊天界面
+      retry = true;
+    } finally {
+      flushing = false;
+      const current = tracker.getSnapshot();
+      if (current.level !== snap.level || current.unreadConversationIds.join('\0') !== snap.unreadConversationIds.join('\0')) {
+        scheduleIconSync();
+      } else if (retry) {
+        scheduleIconSync(retryDelay);
+        retryDelay = Math.min(10000, retryDelay * 2);
+      } else {
+        retryDelay = 500;
+      }
     }
   }
 
-  function scheduleIconSync() {
+  function scheduleIconSync(delay = 60) {
     if (stopped) return;
+    if (pushTimer && pushDelay <= delay) return;
     if (pushTimer) {
       win.clearTimeout?.(pushTimer);
     }
+    pushDelay = delay;
     pushTimer = win.setTimeout?.(() => {
       pushTimer = null;
       void flushIconsNow();
-    }, 60);
+    }, delay);
   }
 
   let hydratedFromStateManager = false;
   let lastKnownStateManager = null;
+  let interactionTarget = null;
 
   function syncStatesFromManager(stateManager, { isInitialHydration = false } = {}) {
     if (!stateManager) return false;
@@ -998,7 +1026,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
           if (!convId || typeof convId !== 'string') continue;
           const res = tracker.applyUpdate(
             { ...raw, conversationId: convId },
-            { isInitialHydration },
+            { isInitialHydration, source: 'manager' },
           );
           if (res.changed) {
             changedAny = true;
@@ -1013,7 +1041,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
 
   function syncViewingContext() {
     if (stopped) return;
-    const info = inspectActiveConversation(doc, win);
+    const info = inspectActiveConversation(doc, win, interactionTarget);
     if (info.stateManager) {
       lastKnownStateManager = info.stateManager;
     }
@@ -1067,7 +1095,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
     },
   });
 
-  // 兜底轮询 stateManager：防止页面早期已建立的连接遗漏个别跃迁
+  // 补读插件挂载前已建立连接的会话。实时流接管后优先使用实时状态。
   const statePollTimer = win.setInterval?.(() => {
     if (stopped) return;
     syncViewingContext();
@@ -1094,7 +1122,12 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
   }
 
   let followUpTimer = null;
-  const onFocusOrInteraction = () => {
+  const onFocusOrInteraction = (event) => {
+    if (event?.type === 'pointerdown' || event?.type === 'click') {
+      interactionTarget = event.target;
+    } else if (event?.type === 'focusin' || event?.type === 'keydown') {
+      interactionTarget = null;
+    }
     scheduleContextScan();
     if (followUpTimer) {
       win.clearTimeout?.(followUpTimer);
@@ -1106,6 +1139,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
   };
   const onPageHide = () => {
     stopped = true;
+    stopTap();
     if (pushTimer) {
       win.clearTimeout?.(pushTimer);
       pushTimer = null;
@@ -1117,12 +1151,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
     if (statePollTimer) {
       win.clearInterval?.(statePollTimer);
     }
-    void bridge?.setAttentionState?.({
-      count: 0,
-      level: 'none',
-      windowPngDataUrl: null,
-      trayPngDataUrl: null,
-    });
+    void pushIconState(0, 'none').catch(() => {});
   };
 
   win.addEventListener?.('focus', onFocusOrInteraction);
@@ -1132,6 +1161,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
   win.addEventListener?.('keydown', onFocusOrInteraction, true);
   win.addEventListener?.('pagehide', onPageHide);
   doc.addEventListener?.('visibilitychange', onFocusOrInteraction);
+  doc.addEventListener?.('focusin', onFocusOrInteraction);
 
   let observer = null;
   if (typeof win.MutationObserver === 'function' && doc.body) {
@@ -1152,11 +1182,17 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
 
   win.__myAntigravityTaskbarBadgeDebug = {
     getSnapshot: () => tracker.getSnapshot(),
-    testIcon: (count = 1, level = 'completed') => pushIconState(count, level),
+    async testIcon(count = 1, level = 'completed') {
+      const result = await pushIconState(count, level);
+      if (count <= 0) return result;
+      const trayIcon = await renderer.renderTrayIcon(level).catch(() => null);
+      return trayIcon && !stopped ? pushIconState(count, level, trayIcon) : result;
+    },
     clearIcon: () => {
       tracker.clearAll();
-      lastPushedSig = '0:none';
-      return pushIconState(0, 'none');
+      lastPushedSig = '';
+      scheduleIconSync();
+      return flushIconsNow();
     },
   };
 
@@ -1165,12 +1201,8 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
     syncViewingContext,
     flushIconsNow,
     dispose() {
-      stopped = true;
-      stopTap();
+      onPageHide();
       observer?.disconnect?.();
-      if (statePollTimer) {
-        win.clearInterval?.(statePollTimer);
-      }
       win.removeEventListener?.('focus', onFocusOrInteraction);
       win.removeEventListener?.('blur', onFocusOrInteraction);
       win.removeEventListener?.('pointerdown', onFocusOrInteraction, true);
@@ -1178,6 +1210,7 @@ function installTaskbarBadgePlugin(win = window, doc = document) {
       win.removeEventListener?.('keydown', onFocusOrInteraction, true);
       win.removeEventListener?.('pagehide', onPageHide);
       doc.removeEventListener?.('visibilitychange', onFocusOrInteraction);
+      doc.removeEventListener?.('focusin', onFocusOrInteraction);
     },
   };
 }

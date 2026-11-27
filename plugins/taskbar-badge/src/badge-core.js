@@ -12,6 +12,8 @@ export const LEVEL_PRIORITY = {
   error: 3,
 };
 
+const SOURCE_PRIORITY = { trajectory: 0, manager: 1, stream: 2 };
+
 /**
  * 规范化 CascadeRunStatus（兼容数字枚举与字符串枚举）。
  * @returns {'running' | 'approval' | 'error' | 'cancelled' | 'idle' | null}
@@ -218,7 +220,7 @@ export function createBadgeTracker(initialViewing = {}) {
     return { changed, snapshot: getSnapshot() };
   }
 
-  function applyUpdate(update, { isInitialHydration = false } = {}) {
+  function applyUpdate(update, { isInitialHydration = false, source = 'stream', generation = 0 } = {}) {
     if (!update || typeof update !== 'object') {
       return { changed: false, snapshot: getSnapshot() };
     }
@@ -234,9 +236,18 @@ export function createBadgeTracker(initialViewing = {}) {
 
     let sess = sessions.get(conversationId);
     if (!sess) {
-      sess = { wasActive: false, lastKind: null };
+      sess = { wasActive: false, lastKind: null, source, generation };
       sessions.set(conversationId, sess);
     }
+    // 拉取的旧轨迹和轮询快照不能覆盖实时更新。重连后忽略旧订阅的帧。
+    if (SOURCE_PRIORITY[source] < SOURCE_PRIORITY[sess.source] ||
+        (source === sess.source && generation < sess.generation)) {
+      return { changed: false, snapshot: getSnapshot() };
+    }
+    const baseline = isInitialHydration && (sess.lastKind === null ||
+      (sess.source === 'trajectory' && source !== 'trajectory' && !sess.wasActive));
+    sess.source = source;
+    sess.generation = generation;
 
     let changed = false;
     if (signal === 'running') {
@@ -244,13 +255,13 @@ export function createBadgeTracker(initialViewing = {}) {
       sess.lastKind = 'running';
     } else if (signal === 'error') {
       // 避免用户已点开消掉同一报错后，后续无状态变化的心跳重复加回角标
-      if (!isInitialHydration && (sess.wasActive || sess.lastKind !== 'error')) {
+      if (!baseline && (sess.wasActive || sess.lastKind !== 'error')) {
         changed = triggerUnread(conversationId, 'error');
       }
       sess.wasActive = false;
       sess.lastKind = 'error';
     } else if (signal === 'approval') {
-      if (!isInitialHydration && (sess.wasActive || sess.lastKind !== 'approval')) {
+      if (!baseline && (sess.wasActive || sess.lastKind !== 'approval')) {
         changed = triggerUnread(conversationId, 'approval');
       }
       sess.wasActive = false;
@@ -259,7 +270,7 @@ export function createBadgeTracker(initialViewing = {}) {
       sess.wasActive = false;
       sess.lastKind = 'cancelled';
     } else if (signal === 'idle') {
-      if (!isInitialHydration && sess.wasActive) {
+      if (!baseline && sess.wasActive) {
         changed = triggerUnread(conversationId, 'completed');
       }
       sess.wasActive = false;

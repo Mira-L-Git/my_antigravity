@@ -1,11 +1,3 @@
-/**
- * icon-renderer：基于原生 HTML5 Canvas 合成多 DPI 任务栏 Overlay 角标与系统托盘状态圆点。
- * - 任务栏 Overlay（16/20/24/32/40 多倍率逐档原生绘制，供 win.setOverlayIcon 使用）：
- *   去掉易发糊的细描边与外留白，最大化数字字号与像素对齐；
- *   完成深灰 #27272A，审批黄色 #FACC15，报错红色 #EF4444
- * - 托盘（64×64）：在原图标白色圆角方框右上角绘制 2 倍大小绿/黄/红状态圆点
- */
-
 export const TASKBAR_BADGE_STYLES = {
   completed: {
     fill: '#27272A',
@@ -19,12 +11,6 @@ export const TASKBAR_BADGE_STYLES = {
     fill: '#EF4444',
     text: '#FFFFFF',
   },
-};
-
-export const TRAY_DOT_COLORS = {
-  completed: '#22C55E',
-  approval: '#FACC15',
-  error: '#EF4444',
 };
 
 export const OVERLAY_DPI_SPECS = [
@@ -95,6 +81,12 @@ export function drawTaskbarOverlayIcon(ctx, count, level, size = 32) {
   ctx.restore();
 }
 
+export const TRAY_DOT_COLORS = {
+  completed: '#22C55E',
+  approval: '#FACC15',
+  error: '#EF4444',
+};
+
 /**
  * 绘制系统托盘图标：圆点直径约占画布 50%，底图微向左下偏移，
  * 使圆点圆心依然精准落在白色圆角方框右上边角且不被画布裁剪。
@@ -134,7 +126,30 @@ export function drawTrayDottedIcon(ctx, baseImg, level, size = 64) {
 
 export function createIconRenderer(win, doc, bridge) {
   let baseImgPromise = null;
+  let cachedOverlay = null;
   const cache = new Map();
+
+  function renderTaskbarIcon(count, level) {
+    const label = formatBadgeCount(count);
+    if (!label || !Object.hasOwn(TASKBAR_BADGE_STYLES, level)) return {};
+    if (cachedOverlay?.label === label && cachedOverlay.level === level) return cachedOverlay.icons;
+
+    const windowReps = [];
+    for (const { scaleFactor, size } of OVERLAY_DPI_SPECS) {
+      const canvas = doc.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext?.('2d');
+      if (!ctx) continue;
+      drawTaskbarOverlayIcon(ctx, count, level, size);
+      const dataUrl = canvas.toDataURL('image/png');
+      if (dataUrl) windowReps.push({ scaleFactor, width: size, height: size, dataUrl });
+    }
+    const windowPngDataUrl = windowReps.find((rep) => rep.scaleFactor === 2)?.dataUrl || windowReps.at(-1)?.dataUrl;
+    const icons = { windowReps, windowPngDataUrl };
+    if (windowPngDataUrl) cachedOverlay = { label, level, icons };
+    return icons;
+  }
 
   function loadImageFromDataUrl(dataUrl) {
     return new Promise((resolve) => {
@@ -149,7 +164,7 @@ export function createIconRenderer(win, doc, bridge) {
     });
   }
 
-  async function ensureBaseImage() {
+  function ensureBaseImage() {
     if (!baseImgPromise) {
       baseImgPromise = (async () => {
         if (!bridge || typeof bridge.getBaseIcon !== 'function') {
@@ -160,79 +175,34 @@ export function createIconRenderer(win, doc, bridge) {
           return null;
         }
         return loadImageFromDataUrl(res.dataUrl);
-      })();
+      })().catch(() => null).then((img) => {
+        if (!img) baseImgPromise = null;
+        return img;
+      });
     }
     return baseImgPromise;
   }
 
-  async function renderIcons(count, level) {
-    const label = formatBadgeCount(count);
-    if (!label || !level || level === 'none') {
-      return { windowPngDataUrl: null, windowReps: null, trayPngDataUrl: null };
-    }
-    const cacheKey = `${label}:${level}`;
-    if (cache.has(cacheKey)) {
-      return cache.get(cacheKey);
-    }
-
-    if (typeof doc?.createElement !== 'function') {
-      return { windowPngDataUrl: null, windowReps: null, trayPngDataUrl: null };
-    }
-
-    const windowReps = [];
-    let windowPngDataUrl = null;
-    for (const spec of OVERLAY_DPI_SPECS) {
-      const winCanvas = doc.createElement('canvas');
-      winCanvas.width = spec.size;
-      winCanvas.height = spec.size;
-      const winCtx = winCanvas.getContext?.('2d');
-      if (!winCtx) continue;
-      drawTaskbarOverlayIcon(winCtx, count, level, spec.size);
-      const dataUrl = winCanvas.toDataURL('image/png');
-      if (dataUrl) {
-        windowReps.push({
-          scaleFactor: spec.scaleFactor,
-          width: spec.size,
-          height: spec.size,
-          dataUrl,
-        });
-        if (spec.size === 32) {
-          windowPngDataUrl = dataUrl;
-        }
-      }
-    }
-    if (!windowPngDataUrl && windowReps.length > 0) {
-      windowPngDataUrl = windowReps[windowReps.length - 1].dataUrl;
-    }
-
-    let trayPngDataUrl = null;
+  async function renderTrayIcon(level) {
+    if (cache.has(level)) return cache.get(level);
+    if (!TRAY_DOT_COLORS[level] || typeof doc?.createElement !== 'function') return null;
     const baseImg = await ensureBaseImage();
-    if (baseImg) {
-      const trayCanvas = doc.createElement('canvas');
-      trayCanvas.width = 64;
-      trayCanvas.height = 64;
-      const trayCtx = trayCanvas.getContext?.('2d');
-      if (trayCtx) {
-        drawTrayDottedIcon(trayCtx, baseImg, level, 64);
-        trayPngDataUrl = trayCanvas.toDataURL('image/png');
-      }
-    }
-
-    const result = { windowPngDataUrl, windowReps, trayPngDataUrl };
-    if (windowPngDataUrl && trayPngDataUrl) {
-      if (cache.size >= 64) {
-        const oldestKey = cache.keys().next().value;
-        cache.delete(oldestKey);
-      }
-      cache.set(cacheKey, result);
-    }
-    return result;
+    if (!baseImg) return null;
+    if (cache.has(level)) return cache.get(level);
+    const canvas = doc.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext?.('2d');
+    if (!ctx) return null;
+    drawTrayDottedIcon(ctx, baseImg, level, 64);
+    const dataUrl = canvas.toDataURL('image/png');
+    if (dataUrl) cache.set(level, dataUrl);
+    return dataUrl;
   }
 
   return {
-    renderIcons,
-    clearCache() {
-      cache.clear();
-    },
+    renderTaskbarIcon,
+    renderTrayIcon,
+    getCachedTrayIcon: (level) => cache.get(level) || null,
   };
 }

@@ -86,11 +86,13 @@ export function installAttentionTransportTap(win, handlers = {}) {
   }
   win.__myAntigravityTaskbarBadgeTapInstalled = true;
 
-  const activeStreams = new Map();
+  const streamsBySocket = new WeakMap();
+  let requestGeneration = 0;
+  let stopped = false;
   const OrigWebSocket = win.WebSocket;
   const origFetch = typeof win.fetch === 'function' ? win.fetch.bind(win) : null;
 
-  function handleOutboundText(raw, socket) {
+  function handleOutboundText(raw, activeStreams) {
     if (typeof raw !== 'string' || raw[0] !== '{') return;
     let msg;
     try {
@@ -109,7 +111,7 @@ export function installAttentionTransportTap(win, handlers = {}) {
         activeStreams.set(msg.streamId, {
           kind: 'state',
           conversationId: cid,
-          socket,
+          generation: ++requestGeneration,
           receivedFirstFrame: false,
         });
       } else if (
@@ -121,14 +123,14 @@ export function installAttentionTransportTap(win, handlers = {}) {
         activeStreams.set(msg.streamId, {
           kind: 'trajectory',
           conversationId: cid,
-          socket,
+          generation: ++requestGeneration,
           receivedFirstFrame: false,
         });
       }
     }
   }
 
-  function handleInboundText(raw) {
+  function handleInboundText(raw, activeStreams) {
     if (typeof raw !== 'string' || raw[0] !== '{') return;
     let msg;
     try {
@@ -148,15 +150,22 @@ export function installAttentionTransportTap(win, handlers = {}) {
       return;
     }
 
-    const isFirst = !meta.receivedFirstFrame;
-    meta.receivedFirstFrame = true;
-
     if (meta.kind === 'state' && msg.payload.update) {
-      onAgentStateUpdate?.(msg.payload.update, { isInitialHydration: isFirst });
+      onAgentStateUpdate?.(msg.payload.update, {
+        isInitialHydration: !meta.receivedFirstFrame,
+        source: 'stream',
+        generation: meta.generation,
+      });
+      meta.receivedFirstFrame = true;
     } else if (meta.kind === 'trajectory' && msg.payload.trajectory) {
       const cid = meta.conversationId || msg.payload.trajectory?.cascadeId || null;
       if (cid) {
-        onTrajectory?.(cid, msg.payload, { isInitialHydration: isFirst });
+        onTrajectory?.(cid, msg.payload, {
+          isInitialHydration: !meta.receivedFirstFrame,
+          source: 'trajectory',
+          generation: meta.generation,
+        });
+        meta.receivedFirstFrame = true;
       }
     }
   }
@@ -172,15 +181,14 @@ export function installAttentionTransportTap(win, handlers = {}) {
         try {
           const urlStr = String(url || '');
           if (urlStr.includes('/connect-websocket')) {
+            const activeStreams = new Map();
+            streamsBySocket.set(this, activeStreams);
             this.addEventListener('message', (event) => {
-              handleInboundText(event?.data);
+              if (!stopped) handleInboundText(event?.data, activeStreams);
             });
             this.addEventListener('close', () => {
-              for (const [id, meta] of activeStreams.entries()) {
-                if (meta.socket === this) {
-                  activeStreams.delete(id);
-                }
-              }
+              activeStreams.clear();
+              streamsBySocket.delete(this);
             });
           }
         } catch {
@@ -190,7 +198,8 @@ export function installAttentionTransportTap(win, handlers = {}) {
 
       send(data) {
         try {
-          handleOutboundText(data, this);
+          const activeStreams = streamsBySocket.get(this);
+          if (!stopped && activeStreams) handleOutboundText(data, activeStreams);
         } catch {
           // 旁路失败绝不阻断原发送
         }
@@ -215,14 +224,31 @@ export function installAttentionTransportTap(win, handlers = {}) {
       const fallbackCid = isTrajectory ? extractRequestConversationId(init?.body) : null;
 
       const resPromise = origFetch(input, init);
-      if (!isStateStream && !isTrajectory) {
+      if (stopped || (!isStateStream && !isTrajectory)) {
         return resPromise;
+      }
+      const generation = ++requestGeneration;
+
+      function observeMessage(obj, isInitialHydration) {
+        if (stopped) return false;
+        if (isStateStream && obj?.update) {
+          onAgentStateUpdate?.(obj.update, { isInitialHydration, source: 'stream', generation });
+          return true;
+        }
+        if (isTrajectory && obj?.trajectory) {
+          const cid = fallbackCid || obj.trajectory.cascadeId;
+          if (cid) {
+            onTrajectory?.(cid, obj, { isInitialHydration, source: 'trajectory', generation });
+            return true;
+          }
+        }
+        return false;
       }
 
       resPromise
         .then((response) => {
           try {
-            if (!response || !response.ok || typeof response.clone !== 'function') {
+            if (stopped || !response || !response.ok || typeof response.clone !== 'function') {
               return;
             }
             const cloned = response.clone();
@@ -231,16 +257,7 @@ export function installAttentionTransportTap(win, handlers = {}) {
             if (ct.includes('application/json') && !ct.includes('connect')) {
               void cloned
                 .json()
-                .then((obj) => {
-                  if (isStateStream && obj?.update) {
-                    onAgentStateUpdate?.(obj.update, { isInitialHydration: false });
-                  } else if (isTrajectory && obj?.trajectory) {
-                    const cid = fallbackCid || obj?.trajectory?.cascadeId || null;
-                    if (cid) {
-                      onTrajectory?.(cid, obj, { isInitialHydration: false });
-                    }
-                  }
-                })
+                .then((obj) => observeMessage(obj, true))
                 .catch(() => {});
               return;
             }
@@ -249,16 +266,7 @@ export function installAttentionTransportTap(win, handlers = {}) {
               let first = true;
               const reader = cloned.body.getReader();
               const parser = createConnectEnvelopeParser((obj) => {
-                const isFirst = first;
-                first = false;
-                if (isStateStream && obj?.update) {
-                  onAgentStateUpdate?.(obj.update, { isInitialHydration: isFirst });
-                } else if (isTrajectory && obj?.trajectory) {
-                  const cid = fallbackCid || obj.trajectory?.cascadeId || null;
-                  if (cid) {
-                    onTrajectory?.(cid, obj, { isInitialHydration: isFirst });
-                  }
-                }
+                if (observeMessage(obj, first)) first = false;
               });
               (async () => {
                 try {
@@ -283,6 +291,6 @@ export function installAttentionTransportTap(win, handlers = {}) {
   }
 
   return () => {
-    activeStreams.clear();
+    stopped = true;
   };
 }

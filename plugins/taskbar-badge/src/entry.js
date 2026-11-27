@@ -2,7 +2,7 @@
  * taskbar-badge 运行时入口：
  * - 旁路监听会话状态跃迁，追踪后台/非当前会话的 完成 / 提问审批 / 报错；
  * - 结合 React Fiber 读取当前正在查看的 conversationId 与窗口聚焦状态，点开对应会话自动消减；
- * - 通过 __myAntigravityAttention IPC 同步更新 Windows 任务栏数字角标与托盘圆点。
+ * - 通过 __myAntigravityAttention IPC 同步更新任务栏状态与托盘圆点。
  */
 import { createBadgeTracker } from './badge-core.js';
 import { createIconRenderer } from './icon-renderer.js';
@@ -23,10 +23,15 @@ function isElementVisible(win, el) {
   return true;
 }
 
+function getElementFiber(el) {
+  const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+  return key ? el[key] : null;
+}
+
 /**
  * 沿聊天输入框 React Fiber 树只读提取当前展示的 cascadeId 及可选 stateManager。
  */
-export function inspectActiveConversation(doc, win = null) {
+export function inspectActiveConversation(doc, win = null, interactionTarget = null) {
   if (!doc?.querySelectorAll) {
     return { conversationId: null, stateManager: null };
   }
@@ -34,17 +39,12 @@ export function inspectActiveConversation(doc, win = null) {
     ...doc.querySelectorAll('[data-testid="agent-input-box"]'),
     ...doc.querySelectorAll('[contenteditable="true"][data-lexical-editor="true"]'),
   ];
-  // 优先扫描当前可见的输入框，避免后台/分栏隐藏容器干扰当前会话判定
-  boxes.sort((a, b) => Number(isElementVisible(win, b)) - Number(isElementVisible(win, a)));
-
+  const visibleConversations = new Map();
+  const inputs = new Map();
   let fallbackStateManager = null;
   for (const el of boxes) {
     if (!el || typeof el !== 'object') continue;
-    const keys = Object.keys(el);
-    const fiberKey = keys.find(
-      (k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'),
-    );
-    let fiber = fiberKey ? el[fiberKey] : null;
+    let fiber = getElementFiber(el);
     let conversationId = null;
     let inExistingConversation = true;
     let foundExisting = false;
@@ -79,9 +79,34 @@ export function inspectActiveConversation(doc, win = null) {
     if (stateManager && !fallbackStateManager) {
       fallbackStateManager = stateManager;
     }
-    if (conversationId && inExistingConversation && isElementVisible(win, el)) {
-      return { conversationId, stateManager: stateManager || fallbackStateManager };
+    if (isElementVisible(win, el)) {
+      const cid = inExistingConversation ? conversationId : null;
+      inputs.set(el, cid);
+      if (cid) visibleConversations.set(cid, stateManager || visibleConversations.get(cid));
     }
+  }
+
+  for (const target of [interactionTarget, doc.activeElement]) {
+    if (!target || target.isConnected === false) continue;
+    for (const [input, cid] of inputs) {
+      if (input === target || input.contains?.(target)) {
+        return { conversationId: cid, stateManager: visibleConversations.get(cid) || fallbackStateManager };
+      }
+    }
+    for (let node = target; node && node.isConnected !== false; node = node.parentElement) {
+      let fiber = getElementFiber(node);
+      for (let steps = 0; fiber && steps < 60; steps += 1, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        const cid = props?.cascadeId || props?.conversationId;
+        if (visibleConversations.has(cid)) {
+          return { conversationId: cid, stateManager: visibleConversations.get(cid) || fallbackStateManager };
+        }
+      }
+    }
+  }
+  if (visibleConversations.size === 1 && ![...inputs.values()].includes(null)) {
+    const [[conversationId, stateManager]] = visibleConversations;
+    return { conversationId, stateManager: stateManager || fallbackStateManager };
   }
   return { conversationId: null, stateManager: fallbackStateManager };
 }
@@ -106,70 +131,83 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
   const renderer = createIconRenderer(win, doc, bridge);
 
   let pushTimer = null;
+  let pushDelay = 0;
   let lastPushedSig = '';
-  let pushSeq = 0;
+  let retryDelay = 500;
+  let flushing = false;
+  let trayRenderPending = false;
   let stopped = false;
 
-  async function pushIconState(count, level) {
+  async function pushIconState(count, level, trayPngDataUrl = null, conversationIds = []) {
     if (!bridge || typeof bridge.setAttentionState !== 'function') {
       return { ok: false, reason: 'no-bridge' };
     }
-    const mySeq = ++pushSeq;
-    if (count <= 0 || level === 'none') {
-      return await bridge.setAttentionState({
-        count: 0,
-        level: 'none',
-        windowPngDataUrl: null,
-        windowReps: null,
-        trayPngDataUrl: null,
-      });
+    let overlay = {};
+    try {
+      overlay = renderer.renderTaskbarIcon(count, level);
+    } catch {
+      // 角标绘制失败时托盘仍可更新，主进程报告失败后重试。
     }
-    const { windowPngDataUrl, windowReps, trayPngDataUrl } = await renderer.renderIcons(
-      count,
-      level,
-    );
-    if (stopped || mySeq !== pushSeq) {
-      return { ok: false, reason: 'superseded' };
-    }
-    return await bridge.setAttentionState({
-      count,
-      level,
-      windowPngDataUrl,
-      windowReps,
-      trayPngDataUrl,
-    });
+    return bridge.setAttentionState({ count, level, ...overlay, trayPngDataUrl, conversationIds });
   }
 
   async function flushIconsNow() {
-    if (stopped || !bridge || typeof bridge.setAttentionState !== 'function') {
-      return;
-    }
+    if (stopped || flushing || typeof bridge?.setAttentionState !== 'function') return;
     const snap = tracker.getSnapshot();
-    const sig = `${snap.count}:${snap.level}`;
-    if (sig === lastPushedSig) {
-      return;
+    const trayIcon = snap.count > 0 ? renderer.getCachedTrayIcon(snap.level) : null;
+    const needsTray = snap.count > 0 && !trayIcon;
+    if (needsTray && !trayRenderPending) {
+      trayRenderPending = true;
+      void renderer.renderTrayIcon(snap.level).catch(() => null).then((icon) => {
+        trayRenderPending = false;
+        if (icon || tracker.getSnapshot().level !== snap.level) scheduleIconSync();
+      });
     }
-    lastPushedSig = sig;
+
+    const sig = JSON.stringify([snap.level, snap.unreadConversationIds, Boolean(trayIcon)]);
+    let retry = needsTray;
+    flushing = true;
     try {
-      await pushIconState(snap.count, snap.level);
+      if (sig !== lastPushedSig) {
+        const result = await pushIconState(snap.count, snap.level, trayIcon, snap.unreadConversationIds);
+        if (result?.ok && result.updatedWindow !== false && result.updatedTray !== false) {
+          lastPushedSig = sig;
+        } else {
+          retry = true;
+        }
+      }
     } catch {
-      // 忽略偶发 IPC 错误，避免影响聊天界面
+      retry = true;
+    } finally {
+      flushing = false;
+      const current = tracker.getSnapshot();
+      if (current.level !== snap.level || current.unreadConversationIds.join('\0') !== snap.unreadConversationIds.join('\0')) {
+        scheduleIconSync();
+      } else if (retry) {
+        scheduleIconSync(retryDelay);
+        retryDelay = Math.min(10000, retryDelay * 2);
+      } else {
+        retryDelay = 500;
+      }
     }
   }
 
-  function scheduleIconSync() {
+  function scheduleIconSync(delay = 60) {
     if (stopped) return;
+    if (pushTimer && pushDelay <= delay) return;
     if (pushTimer) {
       win.clearTimeout?.(pushTimer);
     }
+    pushDelay = delay;
     pushTimer = win.setTimeout?.(() => {
       pushTimer = null;
       void flushIconsNow();
-    }, 60);
+    }, delay);
   }
 
   let hydratedFromStateManager = false;
   let lastKnownStateManager = null;
+  let interactionTarget = null;
 
   function syncStatesFromManager(stateManager, { isInitialHydration = false } = {}) {
     if (!stateManager) return false;
@@ -186,7 +224,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
           if (!convId || typeof convId !== 'string') continue;
           const res = tracker.applyUpdate(
             { ...raw, conversationId: convId },
-            { isInitialHydration },
+            { isInitialHydration, source: 'manager' },
           );
           if (res.changed) {
             changedAny = true;
@@ -201,7 +239,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
 
   function syncViewingContext() {
     if (stopped) return;
-    const info = inspectActiveConversation(doc, win);
+    const info = inspectActiveConversation(doc, win, interactionTarget);
     if (info.stateManager) {
       lastKnownStateManager = info.stateManager;
     }
@@ -255,7 +293,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
     },
   });
 
-  // 兜底轮询 stateManager：防止页面早期已建立的连接遗漏个别跃迁
+  // 补读插件挂载前已建立连接的会话。实时流接管后优先使用实时状态。
   const statePollTimer = win.setInterval?.(() => {
     if (stopped) return;
     syncViewingContext();
@@ -282,7 +320,12 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
   }
 
   let followUpTimer = null;
-  const onFocusOrInteraction = () => {
+  const onFocusOrInteraction = (event) => {
+    if (event?.type === 'pointerdown' || event?.type === 'click') {
+      interactionTarget = event.target;
+    } else if (event?.type === 'focusin' || event?.type === 'keydown') {
+      interactionTarget = null;
+    }
     scheduleContextScan();
     if (followUpTimer) {
       win.clearTimeout?.(followUpTimer);
@@ -294,6 +337,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
   };
   const onPageHide = () => {
     stopped = true;
+    stopTap();
     if (pushTimer) {
       win.clearTimeout?.(pushTimer);
       pushTimer = null;
@@ -305,12 +349,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
     if (statePollTimer) {
       win.clearInterval?.(statePollTimer);
     }
-    void bridge?.setAttentionState?.({
-      count: 0,
-      level: 'none',
-      windowPngDataUrl: null,
-      trayPngDataUrl: null,
-    });
+    void pushIconState(0, 'none').catch(() => {});
   };
 
   win.addEventListener?.('focus', onFocusOrInteraction);
@@ -320,6 +359,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
   win.addEventListener?.('keydown', onFocusOrInteraction, true);
   win.addEventListener?.('pagehide', onPageHide);
   doc.addEventListener?.('visibilitychange', onFocusOrInteraction);
+  doc.addEventListener?.('focusin', onFocusOrInteraction);
 
   let observer = null;
   if (typeof win.MutationObserver === 'function' && doc.body) {
@@ -340,11 +380,17 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
 
   win.__myAntigravityTaskbarBadgeDebug = {
     getSnapshot: () => tracker.getSnapshot(),
-    testIcon: (count = 1, level = 'completed') => pushIconState(count, level),
+    async testIcon(count = 1, level = 'completed') {
+      const result = await pushIconState(count, level);
+      if (count <= 0) return result;
+      const trayIcon = await renderer.renderTrayIcon(level).catch(() => null);
+      return trayIcon && !stopped ? pushIconState(count, level, trayIcon) : result;
+    },
     clearIcon: () => {
       tracker.clearAll();
-      lastPushedSig = '0:none';
-      return pushIconState(0, 'none');
+      lastPushedSig = '';
+      scheduleIconSync();
+      return flushIconsNow();
     },
   };
 
@@ -353,12 +399,8 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
     syncViewingContext,
     flushIconsNow,
     dispose() {
-      stopped = true;
-      stopTap();
+      onPageHide();
       observer?.disconnect?.();
-      if (statePollTimer) {
-        win.clearInterval?.(statePollTimer);
-      }
       win.removeEventListener?.('focus', onFocusOrInteraction);
       win.removeEventListener?.('blur', onFocusOrInteraction);
       win.removeEventListener?.('pointerdown', onFocusOrInteraction, true);
@@ -366,6 +408,7 @@ export function installTaskbarBadgePlugin(win = window, doc = document) {
       win.removeEventListener?.('keydown', onFocusOrInteraction, true);
       win.removeEventListener?.('pagehide', onPageHide);
       doc.removeEventListener?.('visibilitychange', onFocusOrInteraction);
+      doc.removeEventListener?.('focusin', onFocusOrInteraction);
     },
   };
 }

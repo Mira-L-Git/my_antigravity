@@ -182,18 +182,21 @@ test('main-hook 支持独立 mods-state.json 持久化、防越界校验与保�
   }
 });
 
-test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘聚合与销毁恢复', async () => {
+test('main-hook: Windows 任务栏角标、会话去重、托盘聚合与销毁恢复', async () => {
   const filename = path.resolve('loader/main-hook.js');
   const code = fs.readFileSync(filename, 'utf8');
   const cjsRequire = createRequire(filename);
   const mod = { exports: {} };
 
   const handlers = new Map();
-  const winOverlays = [];
+  const overlays = [];
+  const secondOverlays = [];
+  const thumbnailTooltips = [];
   const trayImages = [];
+  const trayTooltips = [];
 
   class FakeTray {
-    setToolTip() {}
+    setToolTip(tip) { trayTooltips.push(tip); }
     setImage(img) {
       trayImages.push(img);
     }
@@ -223,9 +226,17 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
 
   const fakeBaseWin = {
     isDestroyed: () => false,
-    setOverlayIcon(img, desc) {
-      winOverlays.push({ img, desc });
+    setOverlayIcon(icon, description) {
+      overlays.push({ icon, description });
     },
+    setThumbnailToolTip: (tip) => thumbnailTooltips.push(tip),
+    setProgressBar() { assert.fail('任务栏改回数字角标'); },
+    setIcon() { assert.fail('不应替换窗口图标'); },
+  };
+  const secondWin = {
+    ...fakeBaseWin,
+    setOverlayIcon: (icon, description) => secondOverlays.push({ icon, description }),
+    setThumbnailToolTip() {},
   };
 
   const mockElectron = {
@@ -244,9 +255,6 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
         {
           isDestroyed: () => false,
           contentView: { children: [{ webContents: wc1 }] },
-          setOverlayIcon(img, desc) {
-            winOverlays.push({ img, desc });
-          },
         },
       ],
     },
@@ -255,20 +263,16 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
     },
     Tray: FakeTray,
     nativeImage: {
-      createEmpty: () => {
+      createEmpty() {
         const reps = [];
-        return {
-          reps,
-          addRepresentation: (r) => reps.push(r),
-          isEmpty: () => reps.length === 0,
-        };
+        return { reps, addRepresentation: (rep) => reps.push(rep), isEmpty: () => !reps.length };
       },
       createFromDataURL: (url) => ({ kind: 'dataUrl', url, isEmpty: () => false }),
     },
   };
 
   const fakeUtilsMod = {
-    resolveHubWindowFromWebContents: (wc) => (wc === wc1 ? fakeBaseWin : null),
+    resolveHubWindowFromWebContents: (wc) => wc === wc1 ? fakeBaseWin : secondWin,
   };
 
   const customRequire = (id) => {
@@ -284,7 +288,7 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
     exports: mod.exports,
     __filename: filename,
     __dirname: path.dirname(filename),
-    process,
+    process: Object.defineProperty(Object.create(process), 'platform', { value: 'win32' }),
     console,
   });
 
@@ -295,16 +299,15 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
   handlers.get('my-antigravity:get-mods-sync')({ sender: wc1 });
 
   const setAttention = handlers.get('my-antigravity:set-attention-state');
-  // wc1 报告完成（多 DPI setOverlayIcon + 托盘绿点）
+  // 角标优先使用多个 DPI 表示，悬停展示精确数量。
   const r1 = await setAttention(
     { sender: wc1 },
     {
       count: 1,
       level: 'completed',
-      windowPngDataUrl: 'data:image/png;base64,WIN_1',
+      conversationIds: ['first'],
       windowReps: [
         { scaleFactor: 1, width: 16, height: 16, dataUrl: 'data:image/png;base64,WIN_16' },
-        { scaleFactor: 1.5, width: 24, height: 24, dataUrl: 'data:image/png;base64,WIN_24' },
         { scaleFactor: 2, width: 32, height: 32, dataUrl: 'data:image/png;base64,WIN_32' },
       ],
       trayPngDataUrl: 'data:image/png;base64,TRAY_GREEN',
@@ -312,24 +315,24 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
   );
   assert.equal(r1.ok, true);
   assert.equal(r1.windowMethod, 'setOverlayIcon');
-  assert.equal(r1.repCount, 3);
   assert.equal(r1.updatedWindow, true);
   assert.equal(r1.updatedTray, true);
-  assert.equal(winOverlays.at(-1).img.reps.length, 3);
+  assert.equal(overlays.at(-1).icon.reps.length, 2);
+  assert.equal(overlays.at(-1).description, '1 pending conversation');
+  assert.equal(thumbnailTooltips.at(-1), '1 pending conversation');
   assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_GREEN');
 
-  // 计数归 0 时应清除 setOverlayIcon(null, '')
   await setAttention(
     { sender: wc1 },
     {
       count: 0,
       level: 'none',
-      windowPngDataUrl: null,
-      windowReps: null,
       trayPngDataUrl: null,
     },
   );
-  assert.equal(winOverlays.at(-1).img, null);
+  assert.deepEqual(overlays.at(-1), { icon: null, description: '' });
+  assert.equal(thumbnailTooltips.at(-1), '');
+  assert.equal(trayTooltips.at(-1), 'Antigravity');
 
   // wc2 报告审批（黄点），托盘应聚合为最高优先级黄点；随后 wc1 升级为报错（红点）
   await setAttention(
@@ -337,10 +340,12 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
     {
       count: 1,
       level: 'approval',
-      windowPngDataUrl: 'data:image/png;base64,WIN_2',
+      conversationIds: ['shared'],
+      windowPngDataUrl: 'data:image/png;base64,WIN_YELLOW',
       trayPngDataUrl: 'data:image/png;base64,TRAY_YELLOW',
     },
   );
+  assert.equal(secondOverlays.at(-1).icon.url, 'data:image/png;base64,WIN_YELLOW');
   assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_YELLOW');
 
   await setAttention(
@@ -348,15 +353,22 @@ test('main-hook: 支持 BaseWindow/Tray 捕获、多窗口最高优先级托盘�
     {
       count: 2,
       level: 'error',
-      windowPngDataUrl: 'data:image/png;base64,WIN_ERR',
+      conversationIds: ['shared', 'another'],
+      windowPngDataUrl: 'data:image/png;base64,WIN_RED',
       trayPngDataUrl: 'data:image/png;base64,TRAY_RED',
     },
   );
+  assert.equal(overlays.at(-1).icon.url, 'data:image/png;base64,WIN_RED');
+  assert.equal(trayTooltips.at(-1), 'Antigravity · 2 pending conversations');
   assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_RED');
 
   // wc1 关闭销毁后，托盘自动回落为 wc2 的黄点
   wc1Listeners.get('destroyed')?.();
+  assert.equal(trayTooltips.at(-1), 'Antigravity · 1 pending conversation');
   assert.equal(trayImages.at(-1).url, 'data:image/png;base64,TRAY_YELLOW');
+  await setAttention({ sender: wc2 }, { count: 0, level: 'none' });
+  assert.deepEqual(secondOverlays.at(-1), { icon: null, description: '' });
+  assert.equal(trayTooltips.at(-1), 'Antigravity');
 });
 
 test('main-hook: 支持读取 plugin.json 版本号、远端版本比对及白名单打开 GitHub', async () => {
@@ -365,25 +377,25 @@ test('main-hook: 支持读取 plugin.json 版本号、远端版本比对及白�
     const pluginTarget = path.join(tmpConfigDir, 'plugins', 'my_antigravity');
     syncPlugins({ targetDir: pluginTarget });
 
-    assert.equal(mainHook.getAppVersion(tmpConfigDir), '1.0.2');
-    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, '1.0.2');
+    assert.equal(mainHook.getAppVersion(tmpConfigDir), '1.0.3');
+    assert.equal(mainHook.getModCatalog(tmpConfigDir).appVersion, '1.0.3');
 
     const latestRes = await mainHook.checkForUpdates({
       configDir: tmpConfigDir,
-      fetchJson: async () => ({ version: '1.0.2' }),
+      fetchJson: async () => ({ version: '1.0.3' }),
     });
     assert.equal(latestRes.ok, true);
     assert.equal(latestRes.hasUpdate, false);
-    assert.equal(latestRes.currentVersion, '1.0.2');
-    assert.equal(latestRes.latestVersion, '1.0.2');
+    assert.equal(latestRes.currentVersion, '1.0.3');
+    assert.equal(latestRes.latestVersion, '1.0.3');
 
     const newerPatchRes = await mainHook.checkForUpdates({
       configDir: tmpConfigDir,
-      fetchJson: async () => ({ version: '1.0.2' }),
+      fetchJson: async () => ({ version: '1.0.4' }),
     });
     assert.equal(newerPatchRes.ok, true);
     assert.equal(newerPatchRes.hasUpdate, true);
-    assert.equal(newerPatchRes.latestVersion, '1.0.3');
+    assert.equal(newerPatchRes.latestVersion, '1.0.4');
 
     const badUrlRes = await mainHook.openExternalUrl('https://evil.example.com');
     assert.equal(badUrlRes.ok, false);

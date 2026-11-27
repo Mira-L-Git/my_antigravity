@@ -1,10 +1,10 @@
 {
   "id": "taskbar-badge",
   "name": "任务栏与托盘状态角标 (Taskbar Badge)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "enabled": true,
   "entry": "index.js",
   "summary": "任务栏会话计数与托盘状态圆点",
   "summaryEn": "Taskbar badge count & tray status dot",
-  "description": "（测试阶段）在 Windows 任务栏图标上通过多 DPI 原生 Overlay 角标显示待查看会话计数（完成深灰、提问审批黄色、报错红色，按报错>>提问>>完成优先级着色），并在系统托盘白色圆角方框右上角同步显示绿/黄/红状态圆点，点开对应会话后计数消减。"
+  "description": "（测试阶段）在 Windows 任务栏显示待查看会话数字角标，并在托盘显示绿、黄、红圆点。点开对应会话可清除提醒。"
 }

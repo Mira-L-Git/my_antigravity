@@ -1,19 +1,14 @@
-# taskbar-badge（测试阶段 / Experimental）
+# taskbar-badge（测试阶段）
 
-> **状态说明**：本插件当前仍处于**测试阶段**。由于 Windows 任务栏原生 `ITaskbarList3::SetOverlayIcon` 槽位物理尺寸限制（`16×16 DIP`），在低缩放屏幕上两位数清晰度有限，欢迎结合实际场景继续反馈校准。
+后台会话完成、需要审批或报错时提醒。每个待查看会话只计一次，显示报错、审批、完成中优先级最高的状态。窗口聚焦且正在查看对应会话时，清除该会话的提醒。
 
-## 功能特性
+## Windows 任务栏和托盘
 
-- **任务栏数字角标（`win.setOverlayIcon` + 多 DPI `addRepresentation`）**：
-  - 仅对**后台或非当前聚焦查看**的会话计数，按 `conversationId` 去重；点开对应会话（或切回聚焦查看）后计数 `-1`，全部点完归 `0` 后自动清除。
-  - 按 **`报错 >> 提问审批 >> 任务完成`** 优先级着色：
-    - 报错：红色 `#EF4444`（白字）
-    - 提问审批：黄色 `#FACC15`（深色字）
-    - 完成：深炭灰 `#27272A`（白字）
-  - 针对 `1.0x (16px)` / `1.25x (20px)` / `1.5x (24px)` / `2.0x (32px)` / `2.5x (40px)` 分别原生光栅化。
-- **系统托盘状态圆点（`tray.setImage`）**：
-  - 在白色圆角方框右上边角同步绘制绿（完成）/ 黄（审批）/ 红（报错）圆点，多窗口下按最高优先级聚合展示。
+- Windows 任务栏通过 `setOverlayIcon` 显示待查看会话数，完成、审批、报错分别用深灰、黄、红表示。超过 99 显示 `99+`。
+- 将鼠标停在任务栏缩略图或系统托盘图标上可查看准确数量。托盘图标继续用绿、黄、红圆点表示状态。
 
-## 生效前置条件
+多 DPI 角标各自绘制，显示空间仍受 Windows Overlay 的 16 像素槽位限制。本机 ChatGPT Windows 客户端的 JavaScript 使用 `app.setBadgeCount`，Electron 的 Windows 实现同样通过 Overlay 显示。固定任务栏分组的整图由 Windows 根据应用标识和快捷方式选取。[Windows 角标接口](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist3-setoverlayicon) · [Electron Windows 徽标实现](https://github.com/electron/electron/blob/v44.9.1/shell/browser/browser_win.cc#L525-L614) · [Windows 固定图标](https://learn.microsoft.com/en-us/windows/win32/properties/props-system-appusermodel-relaunchiconresource)
 
-需先完全退出 Antigravity 并运行一次 `npm run install-loader`（或双击根目录 `install.cmd`）以注入主进程桥接；此后改动插件源码只需运行 `npm run sync`。
+## 升级
+
+完全退出 Antigravity（包括系统托盘）后运行 `npm run install-loader`，以更新主进程桥接。后续仅修改插件源码时运行 `npm run sync` 即可。

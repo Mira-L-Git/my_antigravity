@@ -565,7 +565,6 @@ function buildMultiDpiNativeImage(nativeImage, reps, fallbackDataUrl) {
 function createBaseIconStore() {
   let loaded = false;
   let baseDataUrl = null;
-  let baseWindowImage = null;
   let baseTrayImage = null;
 
   function ensureLoaded() {
@@ -584,12 +583,6 @@ function createBaseIconStore() {
         const buf = fs.readFileSync(candidate);
         if (!buf || buf.length === 0) continue;
         baseDataUrl = `data:image/png;base64,${buf.toString('base64')}`;
-        if (nativeImage && typeof nativeImage.createFromBuffer === 'function') {
-          const img = nativeImage.createFromBuffer(buf);
-          if (img && (!img.isEmpty || !img.isEmpty())) {
-            baseWindowImage = img;
-          }
-        }
         break;
       } catch (err) {
         console.error('[my_antigravity] Failed to load base icon.png:', err);
@@ -611,8 +604,8 @@ function createBaseIconStore() {
     } catch (err) {
       console.error('[my_antigravity] Failed to load base tray icon:', err);
     }
-    if (!baseTrayImage) {
-      baseTrayImage = baseWindowImage;
+    if (!baseTrayImage && baseDataUrl && typeof nativeImage?.createFromDataURL === 'function') {
+      baseTrayImage = nativeImage.createFromDataURL(baseDataUrl);
     }
   }
 
@@ -620,10 +613,6 @@ function createBaseIconStore() {
     getBaseDataUrl() {
       ensureLoaded();
       return baseDataUrl;
-    },
-    getBaseWindowImage() {
-      ensureLoaded();
-      return baseWindowImage;
     },
     getBaseTrayImage() {
       ensureLoaded();
@@ -652,22 +641,22 @@ function installTrayCapture(onTrayCreated) {
   const origCreateTray = trayModule.createTray;
   const wrappedCreateTray = function (...args) {
     const origSetToolTip = Tray.prototype.setToolTip;
+    let captured = null;
+    let tooltip = '';
     let hooked = false;
     try {
       Tray.prototype.setToolTip = function (...tipArgs) {
-        try {
-          onTrayCreated(this);
-        } catch {
-          // ignore capture error
-        }
+        captured = this;
+        tooltip = tipArgs[0];
         return origSetToolTip.apply(this, tipArgs);
       };
       hooked = true;
     } catch {
       hooked = false;
     }
+    let result;
     try {
-      return origCreateTray.apply(this, args);
+      result = origCreateTray.apply(this, args);
     } finally {
       if (hooked) {
         try {
@@ -677,43 +666,84 @@ function installTrayCapture(onTrayCreated) {
         }
       }
     }
+    if (captured) onTrayCreated(captured, tooltip);
+    return result;
   };
   wrappedCreateTray.__myAntigravityWrapped = true;
   trayModule.createTray = wrappedCreateTray;
 }
 
+function summarizeAttention(entries) {
+  const ids = new Set();
+  let anonymousCount = 0;
+  let level = 'none';
+  let trayPngDataUrl = null;
+  for (const entry of entries) {
+    for (const id of entry.conversationIds) ids.add(id);
+    anonymousCount += entry.count - entry.conversationIds.length;
+    if (ATTENTION_LEVEL_RANK[entry.level] > ATTENTION_LEVEL_RANK[level]) {
+      level = entry.level;
+      trayPngDataUrl = entry.trayPngDataUrl;
+    } else if (entry.level === level && !trayPngDataUrl) {
+      trayPngDataUrl = entry.trayPngDataUrl;
+    }
+  }
+  return { count: ids.size + anonymousCount, level, trayPngDataUrl };
+}
+
 function registerMyAntigravityLoader() {
-  const { ipcMain, nativeImage } = getElectron();
+  const { app, ipcMain, nativeImage } = getElectron();
   if (!ipcMain) {
     return;
   }
 
   const bootEnabledByWebContents = new Map();
   const trackedSenders = new Set();
-  const trayStateByWebContents = new Map();
+  const attentionByWebContents = new Map();
+  const appliedByWindow = new WeakMap();
   const iconStore = createBaseIconStore();
   let capturedTray = null;
+  let trayTooltip = '';
 
-  function applyAggregatedTrayIcon() {
+  function pendingLabel(count) {
+    return app?.getLocale?.()?.startsWith('zh')
+      ? `${count} 个待查看会话`
+      : `${count} pending ${count === 1 ? 'conversation' : 'conversations'}`;
+  }
+
+  function applyWindowAttention(win) {
+    if (!win || win.isDestroyed?.() || typeof win.setOverlayIcon !== 'function') return false;
+    const entries = [...attentionByWebContents.values()].filter((entry) => entry.win === win);
+    const own = summarizeAttention(entries);
+    const previous = appliedByWindow.get(win);
+    const label = own.count > 0 ? pendingLabel(own.count) : '';
+    const primary = entries.filter((entry) => entry.level === own.level).sort((a, b) => b.count - a.count)[0];
+    const overlayCount = primary?.count || 0;
+
+    if (primary && (own.count !== previous?.count || own.level !== previous?.level || overlayCount !== previous?.overlayCount)) {
+      const built = buildMultiDpiNativeImage(nativeImage, primary.windowReps, primary.windowPngDataUrl);
+      if (!built) return false;
+      win.setOverlayIcon(built.img, label);
+    } else if (!primary && previous?.count > 0) {
+      win.setOverlayIcon(null, '');
+    }
+    if (previous?.count !== own.count && (own.count > 0 || previous?.count > 0)) {
+      win.setThumbnailToolTip?.(label);
+    }
+    appliedByWindow.set(win, { level: own.level, count: own.count, overlayCount });
+    return true;
+  }
+
+  function applyAggregatedTrayIcon({ count, trayPngDataUrl }) {
     if (!capturedTray || typeof capturedTray.setImage !== 'function') {
-      return false;
+      return true;
     }
     if (typeof capturedTray.isDestroyed === 'function' && capturedTray.isDestroyed()) {
       capturedTray = null;
-      return false;
+      return true;
     }
-    let best = null;
-    for (const entry of trayStateByWebContents.values()) {
-      if (!entry || entry.count <= 0) continue;
-      if (
-        !best ||
-        entry.rank > best.rank ||
-        (entry.rank === best.rank && entry.updatedAt > best.updatedAt)
-      ) {
-        best = entry;
-      }
-    }
-    if (!best || !best.trayPngDataUrl) {
+    capturedTray.setToolTip?.(count > 0 ? `${trayTooltip} · ${pendingLabel(count)}` : trayTooltip);
+    if (!trayPngDataUrl) {
       const baseTray = iconStore.getBaseTrayImage();
       if (baseTray) {
         capturedTray.setImage(baseTray);
@@ -723,7 +753,7 @@ function registerMyAntigravityLoader() {
     if (!nativeImage || typeof nativeImage.createFromDataURL !== 'function') {
       return false;
     }
-    const img = nativeImage.createFromDataURL(best.trayPngDataUrl);
+    const img = nativeImage.createFromDataURL(trayPngDataUrl);
     if (img && (!img.isEmpty || !img.isEmpty())) {
       if (process.platform === 'darwin' && typeof img.setTemplateImage === 'function') {
         img.setTemplateImage(false);
@@ -734,9 +764,33 @@ function registerMyAntigravityLoader() {
     return false;
   }
 
-  installTrayCapture((tray) => {
+  function updateAttentionSurfaces(win) {
+    const aggregate = summarizeAttention(attentionByWebContents.values());
+    let updatedTray = false;
+    let updatedWindow = process.platform !== 'win32';
+    if (process.platform === 'win32') {
+      try {
+        updatedWindow = applyWindowAttention(win);
+      } catch (err) {
+        console.error('[my_antigravity] Failed to update taskbar attention:', err);
+      }
+    }
+    try {
+      updatedTray = applyAggregatedTrayIcon(aggregate);
+    } catch (err) {
+      console.error('[my_antigravity] Failed to update tray attention:', err);
+    }
+    return { updatedWindow, updatedTray, windowMethod: process.platform === 'win32' && updatedWindow ? 'setOverlayIcon' : null };
+  }
+
+  installTrayCapture((tray, tooltip) => {
     capturedTray = tray;
-    applyAggregatedTrayIcon();
+    trayTooltip = tooltip || 'Antigravity';
+    try {
+      applyAggregatedTrayIcon(summarizeAttention(attentionByWebContents.values()));
+    } catch (err) {
+      console.error('[my_antigravity] Failed to initialize tray attention:', err);
+    }
   });
 
   if (ipcMain.listenerCount(CHANNEL) === 0) {
@@ -754,9 +808,10 @@ function registerMyAntigravityLoader() {
             event.sender.once('destroyed', () => {
               bootEnabledByWebContents.delete(wcId);
               trackedSenders.delete(wcId);
-              if (trayStateByWebContents.delete(wcId)) {
-                applyAggregatedTrayIcon();
-              }
+              const attention = attentionByWebContents.get(wcId);
+              if (!attention) return;
+              attentionByWebContents.delete(wcId);
+              updateAttentionSurfaces(attention.win);
             });
           }
         }
@@ -859,80 +914,42 @@ function registerMyAntigravityLoader() {
       ipcMain.removeHandler?.(CHANNEL_SET_ATTENTION_STATE);
       ipcMain.handle(CHANNEL_SET_ATTENTION_STATE, (event, payload) => {
         try {
-          const count = Math.max(0, Math.floor(Number(payload?.count) || 0));
+          const rawCount = Math.floor(Number(payload?.count));
+          const count = Number.isSafeInteger(rawCount) ? Math.max(0, rawCount) : 0;
           const level =
             typeof payload?.level === 'string' && Object.prototype.hasOwnProperty.call(ATTENTION_LEVEL_RANK, payload.level)
               ? payload.level
               : 'none';
-          const windowPngDataUrl = isValidPngDataUrl(payload?.windowPngDataUrl)
-            ? payload.windowPngDataUrl
-            : null;
           const trayPngDataUrl = isValidPngDataUrl(payload?.trayPngDataUrl)
             ? payload.trayPngDataUrl
             : null;
-
-          let updatedWindow = false;
-          let windowMethod = null;
-          let repCount = 0;
-          const win = resolveSenderWindow(event?.sender);
-          const hasWin = Boolean(win && (!win.isDestroyed || !win.isDestroyed()));
-          const winType = win?.constructor?.name || null;
-          if (hasWin) {
-            if (typeof win.setOverlayIcon === 'function') {
-              windowMethod = 'setOverlayIcon';
-              if (count > 0) {
-                const built = buildMultiDpiNativeImage(
-                  nativeImage,
-                  payload?.windowReps,
-                  windowPngDataUrl,
-                );
-                if (built?.img) {
-                  repCount = built.repCount;
-                  win.setOverlayIcon(built.img, `${count} pending (${level})`);
-                  updatedWindow = true;
-                }
-              } else {
-                win.setOverlayIcon(null, '');
-                updatedWindow = true;
-              }
-            } else if (typeof win.setIcon === 'function') {
-              windowMethod = 'setIcon';
-              if (count > 0) {
-                const built = buildMultiDpiNativeImage(
-                  nativeImage,
-                  payload?.windowReps,
-                  windowPngDataUrl,
-                );
-                if (built?.img) {
-                  repCount = built.repCount;
-                  win.setIcon(built.img);
-                  updatedWindow = true;
-                }
-              } else {
-                const baseWinImg = iconStore.getBaseWindowImage();
-                if (baseWinImg) {
-                  win.setIcon(baseWinImg);
-                  updatedWindow = true;
-                }
-              }
-            }
-          }
-
-          const wcId = typeof event?.sender?.id === 'number' ? event.sender.id : 'default';
-          if (count > 0 && trayPngDataUrl) {
-            trayStateByWebContents.set(wcId, {
-              count,
-              level,
-              rank: ATTENTION_LEVEL_RANK[level] ?? 1,
-              trayPngDataUrl,
-              updatedAt: Date.now(),
+          const windowPngDataUrl = isValidPngDataUrl(payload?.windowPngDataUrl)
+            ? payload.windowPngDataUrl
+            : null;
+          const windowReps = Array.isArray(payload?.windowReps)
+            ? payload.windowReps.slice(0, 5)
+              .filter((rep) => isValidPngDataUrl(rep?.dataUrl))
+              .map(({ scaleFactor, width, height, dataUrl }) => ({
+                scaleFactor: Number(scaleFactor), width: Number(width), height: Number(height), dataUrl,
+              }))
+            : null;
+          const ids = Array.isArray(payload?.conversationIds) ? payload.conversationIds : [];
+          const conversationIds = [...new Set(ids.filter((id) => typeof id === 'string' && id !== ''))].slice(0, count);
+          const sender = event?.sender;
+          const wcId = typeof sender?.id === 'number' ? sender.id : 'default';
+          const previous = attentionByWebContents.get(wcId);
+          const win = resolveSenderWindow(sender) || previous?.win || null;
+          if (count > 0 && level !== 'none') {
+            attentionByWebContents.set(wcId, {
+              win, count, conversationIds, level, trayPngDataUrl, windowReps, windowPngDataUrl,
             });
           } else {
-            trayStateByWebContents.delete(wcId);
+            attentionByWebContents.delete(wcId);
           }
-          const updatedTray = applyAggregatedTrayIcon();
-
-          return { ok: true, hasWin, winType, windowMethod, repCount, updatedWindow, updatedTray };
+          if (previous?.win && previous.win !== win) {
+            updateAttentionSurfaces(previous.win);
+          }
+          return { ok: true, ...updateAttentionSurfaces(win) };
         } catch (err) {
           console.error('[my_antigravity] Failed to set attention state:', err);
           return { ok: false, error: err?.message || String(err) };
