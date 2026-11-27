@@ -257,4 +257,7 @@ test('绝不翻译 google-symbols 图标文字，并覆盖 2.32.2 新增 UI 文�
   assert.equal(tr('Browsing Data'), '浏览数据');
   assert.equal(tr('Bundles'), '插件包 (Bundles)');
   assert.equal(tr('Enable Browser Agent'), '启用浏览器 Agent');
+  assert.equal(tr('Extra High'), '超高');
+  assert.equal(tr('Leaving Soon'), '即将下线');
+  assert.equal(tr('Thinking effort'), '思考深度');
 });

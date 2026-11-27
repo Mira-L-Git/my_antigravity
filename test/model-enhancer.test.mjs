@@ -900,6 +900,116 @@ test('slider-ui: groupedModels 键名兼容与 Orchestrator 行及子菜单图�
   controller.destroy();
 });
 
+test('slider-ui: Orchestrator 保留原版列表交互，并在切换子菜单思考深度时不关闭弹窗', () => {
+  const { win, doc, makeEvent } = createMockDom();
+  const iconsMap = {
+    gemini: '<svg viewBox="0 0 24 24"><path d="M1 1"/></svg>',
+    fallback: '<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>',
+  };
+
+  const orchModel = { label: 'Orchestrator', modelId: 'gemini-pro-orchestrator', value: 99 };
+  const neonLow = { label: 'Gemini 4 Neon (Low)', modelId: 'gemini-4-neon-low', value: 1 };
+  const neonMed = { label: 'Gemini 4 Neon (Medium)', modelId: 'gemini-4-neon-medium', value: 2 };
+  const plannerIndex = new Map([
+    [
+      'gemini-4-neon',
+      new Map([
+        ['low', neonLow],
+        ['medium', neonMed],
+      ]),
+    ],
+  ]);
+
+  const overridePicks = [];
+  let closedCalls = 0;
+
+  const providerCtx = {
+    selectedModel: orchModel,
+    effortIndex: plannerIndex,
+    orchestratorPlanners: [neonLow, neonMed],
+    orchestratorPlannerIndex: plannerIndex,
+    orchestratorPick: {
+      model: neonMed.value,
+      select(val) {
+        overridePicks.push(val);
+      },
+    },
+    userStatus: {
+      cascadeModelConfigData: {
+        groupedModels: {
+          'gemini-4-neon': { displayName: 'Gemini 4 Neon' },
+        },
+      },
+    },
+    groups: [{ groupName: 'Recommended', options: [orchModel] }],
+    bestOfNConfig: { isBestOfNEnabled: false },
+    isModelListLoading: false,
+    setSelectedModel() {
+      closedCalls += 1;
+    },
+  };
+
+  const panelEl = doc.createElement('div');
+  panelEl.setAttribute('data-testid', 'model-selector-panel');
+  const submenuPortal = doc.createElement('div');
+  const effortItem = doc.createElement('div');
+  effortItem.setAttribute('role', 'menuitemradio');
+  const effortSpan = doc.createElement('span');
+  effortSpan.setAttribute('data-testid', 'orchestrator-picker-effort');
+  effortSpan.setAttribute('data-effort', 'low');
+  effortSpan.textContent = 'Low';
+  effortItem.append(effortSpan);
+  submenuPortal.append(effortItem);
+
+  // 模拟 Base UI 气泡阶段调用 onValueChange + setIsOpen(false)
+  effortItem.addEventListener('click', () => {
+    closedCalls += 1;
+  });
+
+  // 挂载 40 层深度的 SubmenuRoot Fiber（模拟经过 Portal / Popup / Positioner 的真实层级）
+  let rootFiber = {
+    key: 'gemini-4-neon',
+    memoizedProps: { title: 'Gemini 4 Neon' },
+    return: null,
+  };
+  for (let i = 0; i < 40; i += 1) {
+    rootFiber = { memoizedProps: {}, return: rootFiber };
+  }
+  effortSpan.__reactFiber$test = rootFiber;
+
+  doc.body.append(panelEl, submenuPortal);
+  panelEl.__reactFiber$test = {
+    memoizedProps: {},
+    return: {
+      memoizedProps: { value: providerCtx },
+      return: {
+        memoizedProps: { modelSorts: [], setIsOpen: () => { closedCalls += 1; }, setSelectedModel: () => {} },
+        return: null,
+      },
+    },
+  };
+
+  const controller = createModelEnhancerController(win, doc, iconsMap);
+  controller.scanPanels();
+
+  // 1. 选中 Orchestrator 时直接保持原版 Stage 2 列表，不显示 Stage 1 滑条
+  assert.equal(panelEl.getAttribute('data-ag-me-stage'), 'list');
+  assert.equal(panelEl.querySelector('[data-ag-me-slider-view]').hidden, true);
+  assert.equal(panelEl.querySelector('[data-ag-me-back-btn]').hidden, true);
+
+  // 2. 模拟 pfb onMouseUp 触发的 el.click()（target=effortItem）+ 原生 click（target=effortSpan）连发：均应阻断关闭且仅提交一次
+  const syntheticClickEvt = makeEvent('click');
+  effortItem.dispatchEvent(syntheticClickEvt);
+  const nativeClickEvt = makeEvent('click');
+  effortSpan.dispatchEvent(nativeClickEvt);
+  assert.equal(syntheticClickEvt.defaultPrevented, true);
+  assert.equal(nativeClickEvt.defaultPrevented, true);
+  assert.deepEqual(overridePicks, [neonLow.value]);
+  assert.equal(closedCalls, 0);
+
+  controller.destroy();
+});
+
 test('build: 构建产物 index.js 可在隔离 VM 中幂等执行', () => {
   const res = buildModelEnhancerPlugin();
   assert.ok(fs.existsSync(res.outPath));

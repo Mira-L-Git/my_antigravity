@@ -3,7 +3,7 @@
 为 Antigravity 桌面版模型选择器提供品牌图标识别与 Codex 风格的二段式思考深度拉条界面：
 
 - **Stage 1（思考深度拉条面板）**：点击模型选择器触发器后首屏展示当前档位（如 `High` / `高`）、可点击的当前模型名按钮（`<模型名> ›`）、默认档位重置按钮（`↺`），以及支持点击平滑滑动、连续跟手拖动预览（松手吸附最近刻度）与键盘 `←/→/Home/End` 调节的胶囊滑轨；若当前档位带有上下文窗口选项（`contextWindowOptions`），下方会保留快捷切换行。
-- **Stage 2（带图标的模型列表）**：点击当前模型名即可平滑切换至模型列表，自动为 Gemini（含 Gemini 4 `Carbon` / `Neon` / `Hydrogen` / `Argon` 与 `Orchestrator` 协调器及其规划器子菜单）、Claude、GPT/OpenAI、DeepSeek、Grok、Qwen、Kimi、GLM/智谱、MiniMax、Hunyuan、MiMo、Muse 等模型注入 `16×16` 品牌 SVG 图标，未知模型使用通用兜底图标 `sparkles`；点击多档位模型会切至该模型并自动返回拉条面板，按 `Esc` 可先返回滑条再退出弹窗。
+- **Stage 2（带图标的模型列表）**：点击当前模型名即可平滑切换至模型列表，自动为 Gemini（含 Gemini 4 `Carbon` / `Neon` / `Hydrogen` / `Argon` 与 `Orchestrator` 协调器及其规划器子菜单）、Claude、GPT/OpenAI、DeepSeek、Grok、Qwen、Kimi、GLM/智谱、MiniMax、Hunyuan、MiMo、Muse 等模型注入 `16×16` 品牌 SVG 图标，未知模型使用通用兜底图标 `sparkles`；点击多档位模型会切至该模型并自动返回拉条面板，按 `Esc` 可先返回滑条再退出弹窗。选中 `Orchestrator` 时不进入 Stage 1 滑条，保留原版列表与右侧「规划模型 → 思考深度」两级子菜单；在子菜单中切换规划模型或思考深度不会关闭弹窗，可连续调整。
 - **语言联动**：自动感知 `zh-cn` 插件与 `<html lang>`，中英文无缝切换。
 
 ---

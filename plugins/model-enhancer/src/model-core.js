@@ -144,6 +144,15 @@ export function formatEffortLabel(effort, lang = 'en') {
   return table[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '');
 }
 
+export function isOrchestratorModel(option) {
+  const id = typeof option?.modelId === 'string' ? option.modelId.trim().toLowerCase() : '';
+  return (
+    id === 'gemini-pro-coordinator' ||
+    id === 'gemini-pro-orchestrator' ||
+    id.startsWith('gemini-pro-orchestrator-')
+  );
+}
+
 function testSafeRegex(regex, text) {
   if (regex.global || regex.sticky) regex.lastIndex = 0;
   return regex.test(text);

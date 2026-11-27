@@ -8,6 +8,7 @@ import {
   formatEffortLabel,
   getAvailableEfforts,
   getDefaultEffort,
+  isOrchestratorModel,
   resolveBaseAndEffort,
   resolveBrandId,
 } from './model-core.js';
@@ -68,7 +69,7 @@ export function inspectModelSelectorPanel(panelEl) {
   let topmostXqcSetSelectedModel = null;
   let setIsOpen = null;
 
-  for (let steps = 0; fiber && steps < 55; steps += 1, fiber = fiber.return) {
+  for (let steps = 0; fiber && steps < 100; steps += 1, fiber = fiber.return) {
     const props = fiber.memoizedProps;
     if (!props || typeof props !== 'object') continue;
 
@@ -122,6 +123,59 @@ export function inspectModelItemFiber(itemEl) {
   return null;
 }
 
+/**
+ * 从 Orchestrator 子菜单项沿 React Fiber 向上查找所属规划器分组（key / title）。
+ * 注意：子菜单经过多层 MenuPopup / Positioner / Context Provider，需遍历足够深的 Fiber 层级，
+ * 并在未命中时回退读取 DOM 中当前展开的 [data-testid="orchestrator-picker-row"]。
+ */
+function inspectOrchestratorSubmenuFiber(el, doc) {
+  let fiber = getReactFiber(el);
+  let groupKey = '';
+  let baseName = '';
+  for (let steps = 0; fiber && steps < 120; steps += 1, fiber = fiber.return) {
+    const props = fiber.memoizedProps;
+    if (!props || typeof props !== 'object') continue;
+    // RVb 中每组使用 <SubmenuRoot key={groupKey} title={group.base}>，内部通过 gW.Provider 传递 { title }
+    const title =
+      typeof props.title === 'string' && props.title
+        ? props.title
+        : typeof props.value?.title === 'string' && props.value.title
+          ? props.value.title
+          : '';
+    if (title) {
+      baseName = title;
+      if (typeof fiber.key === 'string' && fiber.key) {
+        groupKey = fiber.key;
+      }
+      break;
+    }
+  }
+  if (!baseName && doc?.querySelector) {
+    const openTrigger = doc.querySelector(
+      '[data-testid="orchestrator-picker-row"][data-popup-open][data-model-base], [data-testid="orchestrator-picker-row"][aria-expanded="true"][data-model-base]',
+    );
+    baseName = openTrigger?.getAttribute?.('data-model-base') || '';
+  }
+  return { groupKey, baseName };
+}
+
+function findOrchestratorModelOption(ctx) {
+  if (!ctx) return null;
+  if (isOrchestratorModel(ctx.selectedModel)) return ctx.selectedModel;
+  if (Array.isArray(ctx.modelOptions)) {
+    const hit = ctx.modelOptions.find((opt) => isOrchestratorModel(opt) && !opt.disabled);
+    if (hit) return hit;
+  }
+  if (Array.isArray(ctx.groups)) {
+    for (const group of ctx.groups) {
+      if (!Array.isArray(group?.options)) continue;
+      const hit = group.options.find((opt) => isOrchestratorModel(opt) && !opt.disabled);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 function isOwnUiNode(node) {
   if (!node || node.nodeType !== 1) return false;
   return Boolean(
@@ -133,6 +187,7 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
   const panels = new Map();
   let suppressOutsideClick = false;
   let suppressOutsideTimer = null;
+  let lastOrchPick = { value: undefined, time: 0 };
 
   function suppressOutsideClickOnce() {
     suppressOutsideClick = true;
@@ -147,19 +202,94 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
     }
   }
 
-  function handleDocClickCapture(event) {
-    if (!suppressOutsideClick) return;
-    suppressOutsideClick = false;
-    if (suppressOutsideTimer != null && typeof win.clearTimeout === 'function') {
-      win.clearTimeout(suppressOutsideTimer);
-      suppressOutsideTimer = null;
+  function handleOrchestratorPickerClick(event) {
+    if (panels.size === 0) return false;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return false;
+
+    const effortSpan =
+      target.closest('[data-testid="orchestrator-picker-effort"]') ||
+      target.closest('[role="menuitemradio"]')?.querySelector?.('[data-testid="orchestrator-picker-effort"]');
+    const pickerRow = !effortSpan ? target.closest('[data-testid="orchestrator-picker-row"]') : null;
+    if (!effortSpan && !pickerRow) return false;
+
+    let activePanel = null;
+    for (const panelEl of panels.keys()) {
+      if (panelEl.isConnected) {
+        activePanel = panelEl;
+        break;
+      }
     }
+    if (!activePanel) return false;
+
+    const fiberInfo = inspectModelSelectorPanel(activePanel);
+    const ctx = fiberInfo.ctx;
+    const selectOverride = ctx?.orchestratorPick?.select;
+    if (typeof selectOverride !== 'function') return false;
+
+    const groupedModels = ctx.userStatus?.cascadeModelConfigData?.groupedModels;
+    const plannerIndex = ctx.orchestratorPlannerIndex;
+    const planners = Array.isArray(ctx.orchestratorPlanners) ? ctx.orchestratorPlanners : [];
+
+    let chosenOption = null;
+    if (effortSpan) {
+      const effortKey = String(effortSpan.getAttribute('data-effort') || '').toLowerCase();
+      if (!effortKey) return false;
+      const { groupKey, baseName } = inspectOrchestratorSubmenuFiber(effortSpan, doc);
+      const efforts = getAvailableEfforts(groupKey || baseName, plannerIndex, groupedModels);
+      chosenOption = efforts.find((entry) => entry.effort === effortKey)?.option || null;
+    } else if (pickerRow) {
+      const base = pickerRow.getAttribute('data-model-base') || '';
+      const label = pickerRow.getAttribute('data-model-label') || '';
+      if (base) {
+        const { groupKey } = inspectOrchestratorSubmenuFiber(pickerRow, doc);
+        const efforts = getAvailableEfforts(groupKey || base, plannerIndex, groupedModels);
+        const defaultEffort = getDefaultEffort(efforts);
+        chosenOption =
+          efforts.find((entry) => entry.effort === defaultEffort)?.option || efforts[0]?.option || null;
+      } else if (label) {
+        chosenOption = planners.find((opt) => opt?.label === label) || null;
+      }
+    }
+
+    if (!chosenOption || chosenOption.value == null) return false;
+
+    // 阻止 Base UI 菜单项（含 onMouseUp 触发的 el.click() 与原生 click）默认关闭弹窗
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
+
+    const now = Date.now();
+    if (lastOrchPick.value !== chosenOption.value || now - lastOrchPick.time > 60) {
+      lastOrchPick = { value: chosenOption.value, time: now };
+      selectOverride(chosenOption.value);
+      if (!isOrchestratorModel(ctx.selectedModel) && typeof fiberInfo.rawSetSelectedModel === 'function') {
+        const orchOpt = findOrchestratorModelOption(ctx);
+        if (orchOpt) {
+          fiberInfo.rawSetSelectedModel(orchOpt);
+        }
+      }
+    }
+    return true;
   }
 
-  doc.addEventListener?.('click', handleDocClickCapture, true);
+  function handleDocClickCapture(event) {
+    if (suppressOutsideClick) {
+      suppressOutsideClick = false;
+      if (suppressOutsideTimer != null && typeof win.clearTimeout === 'function') {
+        win.clearTimeout(suppressOutsideTimer);
+        suppressOutsideTimer = null;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return;
+    }
+    handleOrchestratorPickerClick(event);
+  }
+
+  // 在 window 捕获阶段监听，确保早于页面上任意 document / #root 级捕获监听
+  win.addEventListener?.('click', handleDocClickCapture, true);
 
   function syncActiveAttribute() {
     if (!doc?.documentElement) return;
@@ -797,8 +927,12 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
       const isBestOfN = Boolean(ctx?.bestOfNConfig?.isBestOfNEnabled);
       const isLoading = Boolean(ctx?.isModelListLoading);
       const selectedModel = ctx?.selectedModel || null;
+      const isOrchestratorSelected = isOrchestratorModel(selectedModel);
 
-      canReturnToSlider = Boolean(ctx && !isBestOfN && !isLoading && selectedModel);
+      // Orchestrator 保留原版列表与多级子菜单交互，不切入 Stage 1 滑条卡片
+      canReturnToSlider = Boolean(
+        ctx && !isBestOfN && !isLoading && selectedModel && !isOrchestratorSelected,
+      );
 
       if (!canReturnToSlider) {
         stage = 'list';
@@ -959,7 +1093,7 @@ export function createModelEnhancerController(win, doc, iconsMap = {}) {
     getPanels: () => panels,
     destroy() {
       win.removeEventListener('keydown', handleWindowKeyDown, true);
-      doc.removeEventListener?.('click', handleDocClickCapture, true);
+      win.removeEventListener?.('click', handleDocClickCapture, true);
       if (suppressOutsideTimer != null && typeof win.clearTimeout === 'function') {
         win.clearTimeout(suppressOutsideTimer);
       }
