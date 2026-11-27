@@ -5,6 +5,12 @@
 
 ---
 
+## v1.0.5 (2026-11-27)
+
+- **`zh-cn`**：补全了中文翻译——补充设置 → 模型页及新版界面的中文字库（含 `Your plan` 订阅套餐、AI 额度超额使用、`Orchestrator Settings` / `Orchestrator Model` / `Executor Model`、`Gemini Models`、每周与 5 小时限额剩余及刷新倒计时、`Not in Project` 等）；新增大小写不敏感二级匹配以兼容句首小写文案，并支持动态倒计时时长（天/小时/分钟）本地化。
+
+---
+
 ## v1.0.4 (2026-11-27)
 
 - **`quota-rings`**：修复额度环显示的问题——移除进度路径上与 `vector-effect="non-scaling-stroke"` 叠加导致 Chromium 按视图比例拉伸的 `pathLength` + `stroke-dasharray` 机制，改为按真实弧长分段几何切片绘制，确保周额度、5 小时额度及单窗圆环在任意剩余比例与缩放下显示准确。

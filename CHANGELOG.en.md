@@ -5,6 +5,12 @@
 
 ---
 
+## v1.0.5 (2026-11-27)
+
+- **`zh-cn`**: Completed Chinese translations—expanded the dictionary for the Settings → Models page and recent UI additions (`Your plan`, AI credit overages, `Orchestrator Settings` / `Orchestrator Model` / `Executor Model`, `Gemini Models`, weekly & 5-hour limit remaining/refresh countdowns, `Not in Project`, etc.), added a case-insensitive secondary dictionary fallback for sentence-case strings, and localized dynamic countdown durations (days/hours/minutes).
+
+---
+
 ## v1.0.4 (2026-11-27)
 
 - **`quota-rings`**: Fixed quota ring display issues by replacing `pathLength` + `stroke-dasharray` (which Chromium stretched under `vector-effect="non-scaling-stroke"`) with exact segmented arc-length slicing, ensuring weekly, 5-hour, and single-window rings render accurate progress proportions across all percentages and DPI scales.
