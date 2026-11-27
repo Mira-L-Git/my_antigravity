@@ -59,10 +59,10 @@ function resolveDinoLocale(win, doc) {
 }
 
 /**
- * 判断一组菜单文本是否属于右侧辅助面板的新建页列表（至少命中 2 个已知锚点）。
+ * 判断一组菜单文本是否属于右侧辅助面板的新建页列表（至少命中 3 个已知锚点，排除浏览器或审查视图）。
  */
 function isAuxNewTabMenuCandidate(textList) {
-  if (!Array.isArray(textList) || textList.length < 2) {
+  if (!Array.isArray(textList) || textList.length < 3) {
     return false;
   }
   let hits = 0;
@@ -79,7 +79,7 @@ function isAuxNewTabMenuCandidate(textList) {
         break;
       }
     }
-    if (hits >= 2) {
+    if (hits >= 3) {
       return true;
     }
   }
@@ -87,28 +87,29 @@ function isAuxNewTabMenuCandidate(textList) {
 }
 
 /**
- * 对右侧辅助面板根容器候选进行打分，严格排除左侧边栏与过小元素。
+ * 对右侧辅助面板根容器候选进行打分：严格要求同时具备新建页菜单与 URL 搜索栏，排除审查/浏览器/弹窗/文件树。
  */
 function scoreAuxPaneCandidate(info) {
   if (!info || !info.rect) return -1;
   const { rect, viewportWidth = 1280, viewportHeight = 800 } = info;
-  if (rect.width < 220 || rect.height < 240) {
+  const minHeight = Math.max(320, viewportHeight * 0.55);
+  if (rect.width < 240 || rect.height < minHeight) {
     return -1;
   }
-  // 严格限定在窗口右侧区域，绝不挂载到左侧边栏
-  if (rect.left < viewportWidth * 0.35) {
+  // 必须位于右侧新建标签页（同时具备新建页菜单与 URL 搜索框），绝不挂载到审查、浏览器、终端或文件树
+  if (!info.hasAuxMenu || !info.hasUrlSearchInput || !info.hasTopRightActions) {
     return -1;
   }
-  if (rect.right > viewportWidth + 8 || rect.bottom > viewportHeight + 8) {
+  if (rect.left < viewportWidth * 0.32 || rect.top > 96) {
+    return -1;
+  }
+  if (rect.right < viewportWidth - 32 || rect.right > viewportWidth + 8 || rect.bottom > viewportHeight + 8) {
     return -1;
   }
 
-  let score = 1;
-  if (info.hasAuxMenu) score += 12;
-  if (info.hasUrlSearchInput) score += 8;
-  if (info.hasTopRightActions) score += 6;
-  if (rect.left >= viewportWidth * 0.5) score += 4;
+  let score = 20;
   if (rect.height >= viewportHeight * 0.7) score += 2;
+  if (rect.width >= viewportWidth * 0.25) score += 4;
   return score;
 }
 
@@ -474,45 +475,41 @@ function isIconOnlyButton(btn) {
   return Boolean(btn.querySelector?.('[class*="icon" i], [class*="symbol" i]')) && text.length <= 24;
 }
 
+const IGNORED_ANCESTOR_SELECTOR =
+  `[${ATTR_OVERLAY}], [role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"], ` +
+  '[data-radix-popper-content-wrapper], [data-radix-portal], [data-my-antigravity-mod]';
+
 /**
- * 在右侧辅助面板内寻找右上角控制栏（放置小恐龙图标触发按钮）。
+ * 在右侧辅助面板「新建标签页」中定位 URL 搜索框右侧的 `⋮` 控制按钮（无新建页菜单或无 URL 搜索框时不挂载）。
  */
 function findAuxToolbarContainer(auxPane) {
   if (!auxPane || typeof auxPane.getBoundingClientRect !== 'function') return null;
+  if (!hasAuxNewTabMenu(auxPane)) return null;
+
   const auxRect = auxPane.getBoundingClientRect();
   const urlInput = auxPane.querySelector?.('input[placeholder*="URL" i], input[placeholder*="Search" i]');
   const inputRect = urlInput && typeof urlInput.getBoundingClientRect === 'function'
     ? urlInput.getBoundingClientRect()
     : null;
-  const hasVisibleInput = Boolean(inputRect && inputRect.width > 0 && inputRect.height > 0);
+  if (!inputRect || inputRect.width <= 0 || inputRect.height <= 0 || inputRect.top > auxRect.top + 120) {
+    return null;
+  }
 
-  const iconButtons = Array.from(auxPane.querySelectorAll('button')).filter((btn) => {
-    if (btn.closest?.(`[${ATTR_OVERLAY}]`)) return false;
+  const inputCenterY = inputRect.top + inputRect.height / 2;
+  const matched = Array.from(auxPane.querySelectorAll('button')).filter((btn) => {
+    if (btn.closest?.(IGNORED_ANCESTOR_SELECTOR)) return false;
     if (btn.hasAttribute?.(ATTR_TRIGGER)) return false;
     if (typeof btn.getBoundingClientRect !== 'function') return false;
     const r = btn.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0 || r.width > 48 || r.height > 48) return false;
     if (!isIconOnlyButton(btn)) return false;
-    return r.left >= auxRect.right - 240;
+    const btnCenterY = r.top + r.height / 2;
+    return (
+      Math.abs(btnCenterY - inputCenterY) <= 24 &&
+      r.left >= inputRect.right - 8 &&
+      r.left >= auxRect.right - 240
+    );
   });
-
-  if (iconButtons.length === 0) return null;
-
-  // 优先匹配与搜索框处于同一水平行的右侧按钮（如新标签页的 `⋮`）
-  let matched = [];
-  if (hasVisibleInput) {
-    const inputCenterY = inputRect.top + inputRect.height / 2;
-    matched = iconButtons.filter((btn) => {
-      const r = btn.getBoundingClientRect();
-      const btnCenterY = r.top + r.height / 2;
-      return Math.abs(btnCenterY - inputCenterY) <= 24 && r.left >= inputRect.right - 8;
-    });
-  }
-
-  // 回退到右侧面板顶部区域（放宽至 120px，兼容外层含 Tab 栏或内边距的容器）
-  if (matched.length === 0) {
-    matched = iconButtons.filter((btn) => btn.getBoundingClientRect().top <= auxRect.top + 120);
-  }
 
   if (matched.length === 0) return null;
   matched.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
@@ -521,7 +518,7 @@ function findAuxToolbarContainer(auxPane) {
 }
 
 /**
- * 探测并评分右侧辅助面板根容器（严格限制在视口右侧）。
+ * 探测并评分右侧辅助面板根容器（严格限制在视口右侧常驻分栏，排除浮层与窄子栏）。
  */
 function findRightAuxPane(win, doc) {
   if (!doc || !doc.body) return null;
@@ -530,13 +527,22 @@ function findRightAuxPane(win, doc) {
 
   const elements = doc.querySelectorAll('div, section, aside, main');
   let bestEl = null;
+  let bestRect = null;
   let bestScore = -1;
 
   for (const el of elements) {
-    if (el.closest?.(`[${ATTR_OVERLAY}]`)) continue;
+    if (el.closest?.(IGNORED_ANCESTOR_SELECTOR)) continue;
     if (typeof el.getBoundingClientRect !== 'function') continue;
     const rect = el.getBoundingClientRect();
-    if (rect.width < 220 || rect.height < 240 || rect.left < vw * 0.35) continue;
+    if (
+      rect.width < 240 ||
+      rect.height < Math.max(320, vh * 0.55) ||
+      rect.left < vw * 0.32 ||
+      rect.top > 96 ||
+      rect.right < vw - 32
+    ) {
+      continue;
+    }
 
     const hasUrlSearchInput = Boolean(
       el.querySelector?.('input[placeholder*="URL" i], input[placeholder*="Search" i]'),
@@ -556,8 +562,17 @@ function findRightAuxPane(win, doc) {
     if (score > bestScore) {
       bestScore = score;
       bestEl = el;
-    } else if (score === bestScore && bestEl && bestEl.contains(el)) {
+      bestRect = rect;
+    } else if (
+      score === bestScore &&
+      bestEl &&
+      bestEl.contains(el) &&
+      bestRect &&
+      rect.width >= bestRect.width - 16
+    ) {
+      // 仅在保持完整面板宽度时向内收敛，绝不收缩到内部文件树等窄子栏
       bestEl = el;
+      bestRect = rect;
     }
   }
 
@@ -944,10 +959,24 @@ function createDinoGameController(win, doc) {
     }
   }
 
+  function cleanupStaleTriggers(keepContainer = null) {
+    const triggers = doc.querySelectorAll?.(`[${ATTR_TRIGGER}="toolbar"]`) || [];
+    let kept = false;
+    for (const btn of triggers) {
+      if (keepContainer && !kept && btn.parentElement === keepContainer) {
+        kept = true;
+      } else {
+        btn.remove?.();
+      }
+    }
+    return kept;
+  }
+
   function syncMount() {
     const t = getLabels();
     const auxPane = findRightAuxPane(win, doc);
     if (!auxPane) {
+      cleanupStaleTriggers(null);
       if (isOpen && overlayEl && !overlayEl.isConnected) {
         closeOverlay();
       }
@@ -955,9 +984,11 @@ function createDinoGameController(win, doc) {
     }
     currentAuxPane = auxPane;
 
-    // 仅在右侧辅助面板右上角挂载小恐龙图标入口
+    // 仅在右侧辅助面板唯一最顶部控制栏挂载 1 个小恐龙图标入口，并清理残留误挂按钮
     const toolbar = findAuxToolbarContainer(auxPane);
-    if (toolbar && !toolbar.container.querySelector(`[${ATTR_TRIGGER}="toolbar"]`)) {
+    if (!toolbar) {
+      cleanupStaleTriggers(null);
+    } else if (!cleanupStaleTriggers(toolbar.container)) {
       const btn = doc.createElement('button');
       btn.type = 'button';
       btn.className = 'my-antigravity-dino-toolbar-btn';

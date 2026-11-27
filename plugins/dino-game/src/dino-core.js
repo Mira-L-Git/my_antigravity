@@ -57,10 +57,10 @@ export function resolveDinoLocale(win, doc) {
 }
 
 /**
- * 判断一组菜单文本是否属于右侧辅助面板的新建页列表（至少命中 2 个已知锚点）。
+ * 判断一组菜单文本是否属于右侧辅助面板的新建页列表（至少命中 3 个已知锚点，排除浏览器或审查视图）。
  */
 export function isAuxNewTabMenuCandidate(textList) {
-  if (!Array.isArray(textList) || textList.length < 2) {
+  if (!Array.isArray(textList) || textList.length < 3) {
     return false;
   }
   let hits = 0;
@@ -77,7 +77,7 @@ export function isAuxNewTabMenuCandidate(textList) {
         break;
       }
     }
-    if (hits >= 2) {
+    if (hits >= 3) {
       return true;
     }
   }
@@ -85,28 +85,29 @@ export function isAuxNewTabMenuCandidate(textList) {
 }
 
 /**
- * 对右侧辅助面板根容器候选进行打分，严格排除左侧边栏与过小元素。
+ * 对右侧辅助面板根容器候选进行打分：严格要求同时具备新建页菜单与 URL 搜索栏，排除审查/浏览器/弹窗/文件树。
  */
 export function scoreAuxPaneCandidate(info) {
   if (!info || !info.rect) return -1;
   const { rect, viewportWidth = 1280, viewportHeight = 800 } = info;
-  if (rect.width < 220 || rect.height < 240) {
+  const minHeight = Math.max(320, viewportHeight * 0.55);
+  if (rect.width < 240 || rect.height < minHeight) {
     return -1;
   }
-  // 严格限定在窗口右侧区域，绝不挂载到左侧边栏
-  if (rect.left < viewportWidth * 0.35) {
+  // 必须位于右侧新建标签页（同时具备新建页菜单与 URL 搜索框），绝不挂载到审查、浏览器、终端或文件树
+  if (!info.hasAuxMenu || !info.hasUrlSearchInput || !info.hasTopRightActions) {
     return -1;
   }
-  if (rect.right > viewportWidth + 8 || rect.bottom > viewportHeight + 8) {
+  if (rect.left < viewportWidth * 0.32 || rect.top > 96) {
+    return -1;
+  }
+  if (rect.right < viewportWidth - 32 || rect.right > viewportWidth + 8 || rect.bottom > viewportHeight + 8) {
     return -1;
   }
 
-  let score = 1;
-  if (info.hasAuxMenu) score += 12;
-  if (info.hasUrlSearchInput) score += 8;
-  if (info.hasTopRightActions) score += 6;
-  if (rect.left >= viewportWidth * 0.5) score += 4;
+  let score = 20;
   if (rect.height >= viewportHeight * 0.7) score += 2;
+  if (rect.width >= viewportWidth * 0.25) score += 4;
   return score;
 }
 
